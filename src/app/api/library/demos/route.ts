@@ -1,5 +1,5 @@
 import path from "path";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { NextResponse } from "next/server";
 import { addDemo, readLibrary, removeLibraryItem } from "@/lib/library-store";
 import { appendAssetToActiveCampaign } from "@/lib/sync-campaign-assets";
@@ -19,9 +19,10 @@ import {
   safeUnlink,
   writeTempBuffer,
 } from "@/lib/ffmpeg";
+import { streamRequestBodyToFile } from "@/lib/stream-request-body";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 function parseDuration(value: string | null): number {
   if (!value) return 0;
@@ -30,21 +31,39 @@ function parseDuration(value: string | null): number {
 }
 
 async function prepareDemoBuffer(options: {
-  buffer: Buffer;
+  buffer?: Buffer;
+  inputPath?: string;
   filename: string;
   contentType: string;
 }): Promise<{ buffer: Buffer; contentType: string; compressed: boolean }> {
   const maxBytes = getMaxUploadBytes();
-  if (options.buffer.length <= maxBytes) {
+  const sourcePath =
+    options.inputPath ??
+    (options.buffer
+      ? await writeTempBuffer(
+          "demo-in",
+          path.extname(options.filename) || ".mp4",
+          options.buffer,
+        )
+      : null);
+
+  if (!sourcePath) {
+    throw new Error("Upload payload is missing.");
+  }
+
+  const ownedTempInput = !options.inputPath;
+  const { size } = await stat(sourcePath);
+
+  if (size <= maxBytes) {
+    const buffer = options.buffer ?? (await readFile(sourcePath));
+    if (ownedTempInput) await safeUnlink(sourcePath);
     return {
-      buffer: options.buffer,
+      buffer,
       contentType: options.contentType,
       compressed: false,
     };
   }
 
-  const ext = path.extname(options.filename) || ".mp4";
-  const inputPath = await writeTempBuffer("demo-in", ext, options.buffer);
   const outputPath = path.join(
     hookrTmpDir(),
     `demo-compressed-${Date.now()}.mp4`,
@@ -52,7 +71,7 @@ async function prepareDemoBuffer(options: {
 
   try {
     await compressVideoForStorage({
-      inputPath,
+      inputPath: sourcePath,
       outputPath,
       maxBytes,
     });
@@ -68,13 +87,14 @@ async function prepareDemoBuffer(options: {
       `${message} Try a shorter clip, or raise the global upload limit in Supabase → Storage → Settings.`,
     );
   } finally {
-    await safeUnlink(inputPath);
+    if (ownedTempInput) await safeUnlink(sourcePath);
     await safeUnlink(outputPath);
   }
 }
 
 async function saveDemoUpload(options: {
-  buffer: Buffer;
+  buffer?: Buffer;
+  inputPath?: string;
   filename: string;
   contentType: string;
   durationSeconds: number;
@@ -118,19 +138,40 @@ async function handleRawUpload(request: Request) {
     );
   }
 
-  const buffer = Buffer.from(await request.arrayBuffer());
-  if (buffer.length === 0) {
-    return NextResponse.json({ error: "Empty upload." }, { status: 400 });
+  const contentLength = Number(request.headers.get("content-length") || "0");
+  const streamToDisk =
+    Number.isFinite(contentLength) && contentLength > 8 * 1024 * 1024;
+  let inputPath: string | null = null;
+
+  try {
+    if (streamToDisk) {
+      inputPath = path.join(hookrTmpDir(), `demo-upload-${Date.now()}.mp4`);
+      await streamRequestBodyToFile(request, inputPath);
+      const demo = await saveDemoUpload({
+        inputPath,
+        filename,
+        contentType,
+        durationSeconds,
+      });
+      return NextResponse.json(demo);
+    }
+
+    const buffer = Buffer.from(await request.arrayBuffer());
+    if (buffer.length === 0) {
+      return NextResponse.json({ error: "Empty upload." }, { status: 400 });
+    }
+
+    const demo = await saveDemoUpload({
+      buffer,
+      filename,
+      contentType,
+      durationSeconds,
+    });
+
+    return NextResponse.json(demo);
+  } finally {
+    if (inputPath) await safeUnlink(inputPath);
   }
-
-  const demo = await saveDemoUpload({
-    buffer,
-    filename,
-    contentType,
-    durationSeconds,
-  });
-
-  return NextResponse.json(demo);
 }
 
 async function handleMultipartUpload(request: Request) {
