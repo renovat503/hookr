@@ -5,17 +5,19 @@ export default function InstagramPage() {
   return (
     <DashboardShell
       header={
-        <div>
-          <h1 className="font-display text-lg font-semibold tracking-tight sm:text-xl">
-            Instagram
-          </h1>
-          <p className="text-xs text-muted sm:text-sm">
-            Connect accounts and schedule finished Reels
-          </p>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="font-display text-lg font-semibold tracking-tight sm:text-xl">
+              Instagram
+            </h1>
+            <p className="text-xs text-muted sm:text-sm">
+              Schedule Reels on a calendar or manage account queues
+            </p>
+          </div>
         </div>
       }
     >
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-6xl">
         <InstagramScheduler />
       </div>
     </DashboardShell>

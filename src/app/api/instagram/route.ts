@@ -75,6 +75,7 @@ export async function GET(request: Request) {
         ...post,
         exportName:
           post.exportName || exportById.get(post.exportId)?.name || post.exportId,
+        exportUrl: exportById.get(post.exportId)?.url ?? null,
       })),
       exports: readyExports,
       queues,
