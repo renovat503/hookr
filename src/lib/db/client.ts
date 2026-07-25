@@ -1,31 +1,32 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { isSupabasePoolerUrl, resolveDatabaseUrl } from "./connection-url";
 import * as schema from "./schema";
 
 let client: ReturnType<typeof postgres> | null = null;
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
-
-function createPostgresClient(url: string) {
-  const needsSsl =
-    /supabase\.(co|com)/i.test(url) ||
-    process.env.DATABASE_SSL === "require" ||
-    process.env.NODE_ENV === "production";
-
-  return postgres(url, {
-    prepare: false,
-    max: 10,
-    connect_timeout: 15,
-    ...(needsSsl ? { ssl: "require" as const } : {}),
-  });
-}
+let loggedConnection = false;
 
 export function getDb() {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) {
-    throw new Error("DATABASE_URL is required when HOOKR_DATA_MODE is enabled.");
-  }
+  const url = resolveDatabaseUrl();
   if (!db) {
-    client = createPostgresClient(url);
+    if (!loggedConnection) {
+      loggedConnection = true;
+      console.log(
+        `[db] connecting via ${isSupabasePoolerUrl(url) ? "Supabase pooler (6543)" : "configured DATABASE_URL"}`,
+      );
+    }
+    const needsSsl =
+      /supabase\.(co|com)/i.test(url) ||
+      process.env.DATABASE_SSL === "require" ||
+      process.env.NODE_ENV === "production";
+
+    client = postgres(url, {
+      prepare: false,
+      max: 10,
+      connect_timeout: 15,
+      ...(needsSsl ? { ssl: "require" as const } : {}),
+    });
     db = drizzle(client, { schema });
   }
   return db;

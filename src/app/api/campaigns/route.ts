@@ -17,10 +17,17 @@ import type { CampaignAudioMode, CampaignBorrowAssetKind } from "@/lib/types";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const data = await readCampaigns();
-  const jar = await cookies();
-  const activeId = jar.get(CAMPAIGN_COOKIE)?.value ?? null;
-  return NextResponse.json({ ...data, activeId });
+  try {
+    const data = await readCampaigns();
+    const jar = await cookies();
+    const activeId = jar.get(CAMPAIGN_COOKIE)?.value ?? null;
+    return NextResponse.json({ ...data, activeId });
+  } catch (err) {
+    console.error("[campaigns] GET failed", err);
+    const message =
+      err instanceof Error ? err.message : "Could not load campaigns.";
+    return NextResponse.json({ error: message, campaigns: [] }, { status: 503 });
+  }
 }
 
 export async function POST(request: Request) {

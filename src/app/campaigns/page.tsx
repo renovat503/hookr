@@ -20,14 +20,26 @@ function CampaignsContent() {
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const res = await fetch("/api/campaigns");
-    const json = (await res.json()) as {
-      campaigns: Campaign[];
-      activeId: string | null;
-    };
-    setCampaigns(json.campaigns ?? []);
-    setActiveId(json.activeId ?? null);
-    setLoading(false);
+    setError(null);
+    try {
+      const res = await fetch("/api/campaigns");
+      const json = (await res.json()) as {
+        campaigns?: Campaign[];
+        activeId?: string | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(json.error || "Could not load campaigns.");
+      }
+      setCampaigns(json.campaigns ?? []);
+      setActiveId(json.activeId ?? null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load campaigns.",
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
