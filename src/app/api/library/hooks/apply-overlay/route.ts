@@ -62,7 +62,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const data = await readLibrary();
+    if (!body.overlayPngBase64?.trim()) {
+      return NextResponse.json(
+        { error: "Caption image missing — refresh the page and try again." },
+        { status: 400 },
+      );
+    }
+
+    const data = await readLibrary("assets");
     const overlayStyle = mergeOverlayStyle(body.overlayStyle);
     const stamp = Date.now();
     const newHookId = `hook-${stamp}`;

@@ -160,11 +160,14 @@ export async function resolveToLocalPath(url: string): Promise<string> {
       return cachedPath;
     }
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) {
       throw new Error(`Could not download media (${res.status}): ${url}`);
     }
     const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length < 1024) {
+      throw new Error(`Downloaded media is too small (${buffer.length} bytes): ${url}`);
+    }
     await writeFile(cachedPath, buffer);
     return cachedPath;
   }

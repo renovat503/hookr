@@ -39,16 +39,34 @@ async function fileExists(p: string) {
   }
 }
 
+const BUNDLED_FONTS_DIR = path.join(
+  process.cwd(),
+  "public",
+  "fonts",
+);
+
+function bundledFont(name: string) {
+  return path.join(BUNDLED_FONTS_DIR, name);
+}
+
 export async function resolveFontFile(
   style: OverlayStyle["fontFamily"] = "impact",
   bold = true,
 ): Promise<string> {
+  const bundled = [
+    bundledFont("BricolageGrotesque-Variable.ttf"),
+    bundledFont("DejaVuSans-Bold.ttf"),
+    bundledFont("DejaVuSans.ttf"),
+  ];
+
   const boldArial = [
+    bundledFont("Arial-Bold.ttf"),
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/Library/Fonts/Arial Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   ];
   const regularArial = [
+    bundledFont("Arial.ttf"),
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/Library/Fonts/Arial.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -93,22 +111,22 @@ export async function resolveFontFile(
       ...boldArial,
     ],
     "bricolage-grotesque": [
-      path.join(
-        process.cwd(),
-        "public",
-        "fonts",
-        "BricolageGrotesque-Variable.ttf",
-      ),
+      bundledFont("BricolageGrotesque-Variable.ttf"),
       ...(bold ? boldArial : regularArial),
     ],
   };
 
-  for (const candidate of map[style] ?? boldArial) {
+  const candidates = [
+    ...bundled,
+    ...(map[style] ?? boldArial),
+  ];
+
+  for (const candidate of candidates) {
     if (await fileExists(candidate)) return candidate;
   }
 
   throw new Error(
-    "No usable font found for text overlays. Install Arial/Impact or DejaVu fonts.",
+    "No usable font found for text overlays. Bundled fonts are missing from public/fonts.",
   );
 }
 
@@ -200,16 +218,35 @@ function extractFfmpegError(stderr: string) {
   const markers = [
     "Error parsing",
     "Error applying option",
+    "Error while",
+    "Error opening",
     "No such filter",
     "Conversion failed",
     "Invalid argument",
     "No option name",
+    "Cannot",
+    "failed",
+    "Permission denied",
+    "No such file",
+    "Decoder",
+    "Invalid data",
   ];
-  const hits = lines.filter((line) =>
-    markers.some((marker) => line.includes(marker)),
+  const hits = lines.filter(
+    (line) =>
+      markers.some((marker) => line.includes(marker)) ||
+      /\berror\b/i.test(line),
   );
-  if (hits.length > 0) return hits.join("\n").slice(-800);
-  return stderr.slice(-800);
+  if (hits.length > 0) {
+    return [...new Set(hits)].join("\n").slice(-1200);
+  }
+  const progressIdx = lines.findIndex((line) => line.includes("frame="));
+  const useful = progressIdx > 0 ? lines.slice(0, progressIdx) : lines;
+  const tail = useful.filter((line) => line.trim()).slice(-12).join("\n");
+  return tail.slice(-1200) || stderr.slice(-1200);
+}
+
+function ffmpegPreset() {
+  return process.env.NODE_ENV === "production" ? "ultrafast" : "veryfast";
 }
 function fitScalePadFilter(
   width: number,
@@ -265,20 +302,38 @@ export function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
+async function assertReadableMedia(filePath: string, label: string) {
+  if (!(await fileExists(filePath))) {
+    throw new Error(`${label} is missing: ${filePath}`);
+  }
+  const { size } = await import("fs/promises").then((fs) => fs.stat(filePath));
+  if (size < 1024) {
+    throw new Error(`${label} is too small (${size} bytes): ${filePath}`);
+  }
+}
+
 export async function overlayPngOntoVideo(options: {
   inputPath: string;
   outputPath: string;
   overlayPngBase64: string;
 }): Promise<void> {
+  const pngBuffer = Buffer.from(options.overlayPngBase64, "base64");
+  if (pngBuffer.length < 256) {
+    throw new Error("Caption PNG is empty — refresh and try Apply caption again.");
+  }
+
+  await assertReadableMedia(options.inputPath, "Input video");
+
   const tmpDir = path.join(/* turbopackIgnore: true */ process.cwd(), "tmp");
   await mkdir(tmpDir, { recursive: true });
   await mkdir(path.dirname(options.outputPath), { recursive: true });
 
   const pngPath = path.join(tmpDir, `overlay-${Date.now()}.png`);
-  await writeFile(pngPath, Buffer.from(options.overlayPngBase64, "base64"));
+  await writeFile(pngPath, pngBuffer);
 
   const frameW = CAPTION_FRAME.width;
   const frameH = CAPTION_FRAME.height;
+  const preset = ffmpegPreset();
 
   try {
     const hasAudio = await hasAudioStream(options.inputPath);
@@ -289,19 +344,19 @@ export async function overlayPngOntoVideo(options: {
       pngPath,
       "-filter_complex",
       [
-        `[0:v]${reelCoverScaleCropFilter(frameW, frameH)}[base]`,
+        `[0:v]${reelCoverScaleCropFilter(frameW, frameH)},format=yuv420p[base]`,
         `[1:v]format=rgba[ov]`,
         `[base][ov]overlay=0:0:format=auto[outv]`,
       ].join(";"),
       "-map",
       "[outv]",
-      ...(hasAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"] : []),
+      ...(hasAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"] : ["-an"]),
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      preset,
       "-crf",
-      "18",
+      "20",
       "-movflags",
       "+faststart",
       "-shortest",
