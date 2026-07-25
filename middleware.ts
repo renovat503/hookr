@@ -4,7 +4,7 @@ import {
   CAMPAIGN_COOKIE,
   SESSION_COOKIE,
   verifySessionToken,
-} from "@/lib/auth";
+} from "@/lib/auth-session";
 
 function isPublic(pathname: string): boolean {
   if (pathname === "/login") return true;
@@ -35,7 +35,7 @@ function needsActiveCampaign(pathname: string): boolean {
   );
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublic(pathname)) {
@@ -43,7 +43,7 @@ export function middleware(request: NextRequest) {
   }
 
   const session = request.cookies.get(SESSION_COOKIE)?.value;
-  if (!verifySessionToken(session)) {
+  if (!(await verifySessionToken(session))) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }

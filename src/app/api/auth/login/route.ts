@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import {
   createSessionToken,
-  getAppPassword,
+  isSecureRequest,
+  SESSION_COOKIE,
   sessionCookieOptions,
-  verifyPassword,
-} from "@/lib/auth";
+} from "@/lib/auth-session";
+import { getAppPassword, verifyPassword } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -30,12 +31,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid password." }, { status: 401 });
     }
 
-    const secure = new URL(request.url).protocol === "https:";
     const res = NextResponse.json({ ok: true });
     res.cookies.set(
-      "hookr_session",
-      createSessionToken(),
-      sessionCookieOptions(secure),
+      SESSION_COOKIE,
+      await createSessionToken(),
+      sessionCookieOptions(isSecureRequest(request)),
     );
     return res;
   } catch {
