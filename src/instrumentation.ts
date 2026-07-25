@@ -20,6 +20,9 @@ export async function register() {
     }
   }
 
+  const { ensureInstagramMeta } = await import("./lib/db/ensure-instagram-meta");
+  void ensureInstagramMeta();
+
   const { processInstagramDue } = await import("./lib/process-instagram-due");
 
   const tick = () => {
