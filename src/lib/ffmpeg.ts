@@ -917,18 +917,30 @@ export async function compressVideoForStorage(options: {
   maxBytes: number;
 }): Promise<void> {
   await mkdir(path.dirname(options.outputPath), { recursive: true });
+  const { size: inputBytes } = await stat(options.inputPath);
   const hasAudio = await hasAudioStream(options.inputPath);
-  const attempts = [
-    { height: 1080, crf: 28, audioKbps: 96 },
-    { height: 720, crf: 28, audioKbps: 96 },
-    { height: 720, crf: 32, audioKbps: 64 },
-    { height: 480, crf: 32, audioKbps: 64 },
-  ] as const;
+  const attempts =
+    inputBytes > 150 * 1024 * 1024
+      ? [
+          { height: 480, crf: 34, audioKbps: 48 },
+          { height: 360, crf: 36, audioKbps: 48 },
+        ]
+      : inputBytes > 80 * 1024 * 1024
+        ? [
+            { height: 720, crf: 30, audioKbps: 64 },
+            { height: 480, crf: 32, audioKbps: 64 },
+          ]
+        : [
+            { height: 720, crf: 28, audioKbps: 96 },
+            { height: 480, crf: 32, audioKbps: 64 },
+          ];
 
   for (const attempt of attempts) {
     const h = evenDimension(attempt.height);
     const scale = `scale=-2:${h}:force_original_aspect_ratio=decrease,setsar=1`;
     await runFfmpeg([
+      "-threads",
+      "1",
       "-i",
       options.inputPath,
       "-vf",
@@ -936,9 +948,11 @@ export async function compressVideoForStorage(options: {
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      "ultrafast",
       "-crf",
       String(attempt.crf),
+      "-x264-params",
+      "ref=1:rc-lookahead=0:threads=1",
       ...(hasAudio
         ? ["-c:a", "aac", "-b:a", `${attempt.audioKbps}k`]
         : ["-an"]),
@@ -956,7 +970,7 @@ export async function compressVideoForStorage(options: {
   const { size } = await stat(options.outputPath).catch(() => ({ size: 0 }));
   throw new Error(
     size > 0
-      ? `Could not compress video below ${Math.round(options.maxBytes / (1024 * 1024))} MB (still ${Math.round(size / (1024 * 1024))} MB). Trim the clip or upgrade Supabase storage limits.`
+      ? `Could not compress video below ${Math.round(options.maxBytes / (1024 * 1024))} MB (still ${Math.round(size / (1024 * 1024))} MB). Trim the clip to under 2 minutes or export a smaller MP4 first.`
       : "Could not compress video for upload.",
   );
 }

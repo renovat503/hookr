@@ -221,7 +221,7 @@ export function MediaLibrary({
     setError(null);
     setDemoUploadNote(
       file.size > LARGE_DEMO_BYTES
-        ? "Large video — compressing on the server before upload…"
+        ? "Large video — uploading and compressing on the server. This can take a few minutes; keep this tab open."
         : null,
     );
     try {

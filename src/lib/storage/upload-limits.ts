@@ -1,10 +1,21 @@
 const DEFAULT_MAX_UPLOAD_MB = 48;
+const DEFAULT_MAX_SERVER_COMPRESS_MB = 200;
 
 export function getMaxUploadBytes(): number {
   const raw = process.env.SUPABASE_MAX_UPLOAD_MB?.trim();
   const mb = raw ? Number(raw) : DEFAULT_MAX_UPLOAD_MB;
   if (!Number.isFinite(mb) || mb <= 0) {
     return DEFAULT_MAX_UPLOAD_MB * 1024 * 1024;
+  }
+  return Math.round(mb * 1024 * 1024);
+}
+
+/** Largest source file we'll attempt to compress on the server (Railway memory). */
+export function getMaxServerCompressBytes(): number {
+  const raw = process.env.HOOKR_MAX_SERVER_COMPRESS_MB?.trim();
+  const mb = raw ? Number(raw) : DEFAULT_MAX_SERVER_COMPRESS_MB;
+  if (!Number.isFinite(mb) || mb <= 0) {
+    return DEFAULT_MAX_SERVER_COMPRESS_MB * 1024 * 1024;
   }
   return Math.round(mb * 1024 * 1024);
 }

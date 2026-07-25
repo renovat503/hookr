@@ -1,14 +1,16 @@
 import path from "path";
-import { readFile, stat } from "fs/promises";
+import { stat } from "fs/promises";
 import { NextResponse } from "next/server";
 import { addDemo, readLibrary, removeLibraryItem } from "@/lib/library-store";
 import { appendAssetToActiveCampaign } from "@/lib/sync-campaign-assets";
 import {
   deleteMedia,
   guessVideoContentType,
-  saveMediaBuffer,
+  saveMediaFromLocalPath,
 } from "@/lib/storage/media";
 import {
+  formatMegabytes,
+  getMaxServerCompressBytes,
   getMaxUploadBytes,
   isSupabaseSizeLimitError,
   supabaseSizeLimitMessage,
@@ -30,13 +32,19 @@ function parseDuration(value: string | null): number {
   return Number.isFinite(parsed) ? Math.max(1, parsed) : 0;
 }
 
-async function prepareDemoBuffer(options: {
+async function prepareDemoFile(options: {
   buffer?: Buffer;
   inputPath?: string;
   filename: string;
   contentType: string;
-}): Promise<{ buffer: Buffer; contentType: string; compressed: boolean }> {
+}): Promise<{
+  localPath: string;
+  contentType: string;
+  compressed: boolean;
+  cleanup: string[];
+}> {
   const maxBytes = getMaxUploadBytes();
+  const maxServerBytes = getMaxServerCompressBytes();
   const sourcePath =
     options.inputPath ??
     (options.buffer
@@ -54,13 +62,19 @@ async function prepareDemoBuffer(options: {
   const ownedTempInput = !options.inputPath;
   const { size } = await stat(sourcePath);
 
-  if (size <= maxBytes) {
-    const buffer = options.buffer ?? (await readFile(sourcePath));
+  if (size > maxServerBytes) {
     if (ownedTempInput) await safeUnlink(sourcePath);
+    throw new Error(
+      `This video is ${formatMegabytes(size)} — too large to compress on the server. Trim it to under ${formatMegabytes(maxServerBytes)} or export a smaller MP4 first.`,
+    );
+  }
+
+  if (size <= maxBytes) {
     return {
-      buffer,
+      localPath: sourcePath,
       contentType: options.contentType,
       compressed: false,
+      cleanup: ownedTempInput ? [sourcePath] : [],
     };
   }
 
@@ -75,20 +89,19 @@ async function prepareDemoBuffer(options: {
       outputPath,
       maxBytes,
     });
-    const buffer = await readFile(outputPath);
     return {
-      buffer,
+      localPath: outputPath,
       contentType: "video/mp4",
       compressed: true,
+      cleanup: [
+        outputPath,
+        ...(ownedTempInput ? [sourcePath] : []),
+      ],
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Could not compress video.";
-    throw new Error(
-      `${message} Try a shorter clip, or raise the global upload limit in Supabase → Storage → Settings.`,
-    );
-  } finally {
     if (ownedTempInput) await safeUnlink(sourcePath);
     await safeUnlink(outputPath);
+    throw err;
   }
 }
 
@@ -99,26 +112,32 @@ async function saveDemoUpload(options: {
   contentType: string;
   durationSeconds: number;
 }) {
-  const prepared = await prepareDemoBuffer(options);
-  const id = `demo-${Date.now()}`;
-  const storageName = `${id}.mp4`;
-  const url = await saveMediaBuffer({
-    storageKey: `uploads/demos/${storageName}`,
-    buffer: prepared.buffer,
-    contentType: prepared.contentType || guessVideoContentType(storageName),
-  });
+  const prepared = await prepareDemoFile(options);
+  try {
+    const id = `demo-${Date.now()}`;
+    const storageName = `${id}.mp4`;
+    const url = await saveMediaFromLocalPath({
+      storageKey: `uploads/demos/${storageName}`,
+      localPath: prepared.localPath,
+      contentType: prepared.contentType || guessVideoContentType(storageName),
+    });
 
-  const baseName = options.filename.replace(/\.[^/.]+$/, "") || "Demo";
-  const demo = await addDemo({
-    id,
-    name: prepared.compressed ? `${baseName} (compressed)` : baseName,
-    url,
-    durationSeconds: options.durationSeconds,
-    uploadedAt: new Date().toISOString(),
-  });
+    const baseName = options.filename.replace(/\.[^/.]+$/, "") || "Demo";
+    const demo = await addDemo({
+      id,
+      name: prepared.compressed ? `${baseName} (compressed)` : baseName,
+      url,
+      durationSeconds: options.durationSeconds,
+      uploadedAt: new Date().toISOString(),
+    });
 
-  await appendAssetToActiveCampaign("demos", id);
-  return demo;
+    await appendAssetToActiveCampaign("demos", id);
+    return demo;
+  } finally {
+    for (const filePath of prepared.cleanup) {
+      await safeUnlink(filePath);
+    }
+  }
 }
 
 async function handleRawUpload(request: Request) {
