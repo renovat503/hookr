@@ -8,6 +8,7 @@ import {
   usesSupabaseRead,
 } from "@/lib/config/storage-mode";
 import { formatPgError, isSupabasePoolerUrl, resolveDatabaseUrl } from "@/lib/db/connection-url";
+import { getDb } from "@/lib/db/client";
 import { getStorageBucket, getSupabaseAdmin } from "@/lib/storage/supabase";
 
 export const runtime = "nodejs";
