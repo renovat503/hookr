@@ -33,6 +33,23 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# generated hook clips
+/public/generated/*
+!/public/generated/.gitkeep
+
+# uploaded demos & exports
+/public/uploads/*
+!/public/uploads/demos/.gitkeep
+/public/exports/*
+!/public/exports/.gitkeep
+
+# local library manifest
+/data/*
+!/data/.gitkeep
+
+# ffmpeg temp files
+/tmp/
+
 # vercel
 .vercel
 
