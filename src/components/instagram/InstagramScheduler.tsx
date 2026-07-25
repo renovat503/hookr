@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarDays,
+  ChevronDown,
   Clapperboard,
   Layers,
   Link2,
@@ -462,32 +463,37 @@ export function InstagramScheduler() {
         </p>
       ) : null}
 
-      {/* Top bar: accounts + view toggle */}
+      {/* Top bar: account selector + view toggle */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          {data.accounts.map((account) => (
-            <button
-              key={account.id}
-              type="button"
-              onClick={() => setActiveAccountId(account.id)}
-              className={cn(
-                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                account.id === activeAccountId
-                  ? "bg-accent text-accent-fg"
-                  : "border border-border bg-surface-raised text-muted hover:text-foreground",
-              )}
-            >
-              @{account.username}
-              {(data.queues?.[account.id]?.queue.length ?? 0) > 0 && (
-                <span className="ml-1.5 opacity-70">
-                  ({data.queues[account.id].queue.length})
-                </span>
-              )}
-            </button>
-          ))}
+          {data.accounts.length > 0 ? (
+            <div className="relative min-w-[12rem]">
+              <label htmlFor="instagram-account-select" className="sr-only">
+                Instagram account
+              </label>
+              <select
+                id="instagram-account-select"
+                value={activeAccountId}
+                onChange={(e) => setActiveAccountId(e.target.value)}
+                className="w-full appearance-none rounded-xl border border-border bg-surface-raised py-2 pl-3 pr-9 text-sm font-medium text-foreground outline-none ring-accent focus:ring-2"
+              >
+                {data.accounts.map((account) => {
+                  const queueLength =
+                    data.queues?.[account.id]?.queue.length ?? 0;
+                  return (
+                    <option key={account.id} value={account.id}>
+                      @{account.username}
+                      {queueLength > 0 ? ` · ${queueLength} queued` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            </div>
+          ) : null}
           <a
             href="/api/instagram/auth"
-            className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border px-4 py-2 text-sm text-muted hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-border px-3 py-2 text-sm text-muted hover:text-foreground"
           >
             <Link2 className="h-4 w-4" />
             Connect
