@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { ReelPlayer } from "@/components/ui/ReelPlayer";
+import { buildQueueCaption } from "@/lib/instagram-queue";
 import { formatSlotTimeLabel, type ScheduleSlot } from "@/lib/posting-slots";
 import type { LibraryExport } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -12,10 +13,12 @@ export type BulkScheduleAssignment = {
   dateIso: string;
   time: string;
   scheduledAt: string;
+  caption: string;
 };
 
 type BulkScheduleModalProps = {
   open: boolean;
+  accountId: string;
   accountUsername: string;
   exports: LibraryExport[];
   previewSlots: ScheduleSlot[];
@@ -23,8 +26,19 @@ type BulkScheduleModalProps = {
   onConfirm: (assignments: BulkScheduleAssignment[]) => void | Promise<void>;
 };
 
+function defaultCaptionStorageKey(accountId: string) {
+  return `hookr-bulk-caption-${accountId}`;
+}
+
+function fallbackCaption(exp: LibraryExport, defaultCaption: string) {
+  const trimmed = defaultCaption.trim();
+  if (trimmed) return trimmed;
+  return buildQueueCaption(exp);
+}
+
 export function BulkScheduleModal({
   open,
+  accountId,
   accountUsername,
   exports,
   previewSlots,
@@ -32,27 +46,133 @@ export function BulkScheduleModal({
   onConfirm,
 }: BulkScheduleModalProps) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [defaultCaption, setDefaultCaption] = useState("");
+  const [captions, setCaptions] = useState<Record<string, string>>({});
+  const [customized, setCustomized] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const exportById = useMemo(
+    () => new Map(exports.map((exp) => [exp.id, exp])),
+    [exports],
+  );
 
   const selectedPreview = useMemo(
     () => previewSlots.slice(0, selected.length),
     [previewSlots, selected.length],
   );
 
+  useEffect(() => {
+    if (!open) return;
+    setSelected([]);
+    setCaptions({});
+    setCustomized(new Set());
+    setError(null);
+    if (accountId) {
+      try {
+        setDefaultCaption(
+          localStorage.getItem(defaultCaptionStorageKey(accountId)) ?? "",
+        );
+      } catch {
+        setDefaultCaption("");
+      }
+    } else {
+      setDefaultCaption("");
+    }
+  }, [open, accountId]);
+
+  const persistDefaultCaption = (value: string) => {
+    if (!accountId) return;
+    try {
+      if (value.trim()) {
+        localStorage.setItem(defaultCaptionStorageKey(accountId), value);
+      } else {
+        localStorage.removeItem(defaultCaptionStorageKey(accountId));
+      }
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const applyDefaultToSelected = (value: string, onlyUncustomized = true) => {
+    setCaptions((current) => {
+      const next = { ...current };
+      for (const exportId of selected) {
+        if (onlyUncustomized && customized.has(exportId)) continue;
+        const exp = exportById.get(exportId);
+        next[exportId] = exp ? fallbackCaption(exp, value) : value.trim();
+      }
+      return next;
+    });
+  };
+
+  const handleDefaultCaptionChange = (value: string) => {
+    setDefaultCaption(value);
+    applyDefaultToSelected(value);
+  };
+
   if (!open) return null;
 
   const toggle = (exportId: string) => {
-    setSelected((current) =>
-      current.includes(exportId)
-        ? current.filter((id) => id !== exportId)
-        : [...current, exportId],
-    );
+    setSelected((current) => {
+      const checked = current.includes(exportId);
+      if (checked) {
+        setCaptions((prev) => {
+          const next = { ...prev };
+          delete next[exportId];
+          return next;
+        });
+        setCustomized((prev) => {
+          const next = new Set(prev);
+          next.delete(exportId);
+          return next;
+        });
+        return current.filter((id) => id !== exportId);
+      }
+
+      const exp = exportById.get(exportId);
+      if (exp) {
+        setCaptions((prev) => ({
+          ...prev,
+          [exportId]: fallbackCaption(exp, defaultCaption),
+        }));
+      }
+      return [...current, exportId];
+    });
   };
 
   const selectAll = () => {
     const max = Math.min(exports.length, previewSlots.length);
-    setSelected(exports.slice(0, max).map((exp) => exp.id));
+    const ids = exports.slice(0, max).map((exp) => exp.id);
+    setSelected(ids);
+    setCaptions(
+      Object.fromEntries(
+        ids.map((id) => {
+          const exp = exportById.get(id);
+          return [id, exp ? fallbackCaption(exp, defaultCaption) : ""];
+        }),
+      ),
+    );
+    setCustomized(new Set());
+  };
+
+  const updateVideoCaption = (exportId: string, value: string) => {
+    setCaptions((prev) => ({ ...prev, [exportId]: value }));
+    setCustomized((prev) => new Set(prev).add(exportId));
+  };
+
+  const resetVideoCaption = (exportId: string) => {
+    const exp = exportById.get(exportId);
+    if (!exp) return;
+    setCaptions((prev) => ({
+      ...prev,
+      [exportId]: fallbackCaption(exp, defaultCaption),
+    }));
+    setCustomized((prev) => {
+      const next = new Set(prev);
+      next.delete(exportId);
+      return next;
+    });
   };
 
   const confirm = async () => {
@@ -70,18 +190,23 @@ export function BulkScheduleModal({
       const assignments: BulkScheduleAssignment[] = selected
         .map((exportId, index) => {
           const slot = selectedPreview[index];
-          if (!slot) return null;
+          const exp = exportById.get(exportId);
+          if (!slot || !exp) return null;
           return {
             exportId,
             dateIso: slot.dateIso,
             time: slot.time,
             scheduledAt: slot.scheduledAt.toISOString(),
+            caption: captions[exportId]?.trim() || buildQueueCaption(exp),
           };
         })
         .filter((item): item is BulkScheduleAssignment => item !== null);
 
       await onConfirm(assignments);
+      persistDefaultCaption(defaultCaption);
       setSelected([]);
+      setCaptions({});
+      setCustomized(new Set());
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk schedule failed.");
@@ -92,7 +217,7 @@ export function BulkScheduleModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-      <div className="flex max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
+      <div className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Bulk schedule</h2>
@@ -116,6 +241,38 @@ export function BulkScheduleModal({
             </p>
           ) : null}
 
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="bulk-default-caption"
+                className="text-sm font-medium"
+              >
+                Default description
+              </label>
+              {selected.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => applyDefaultToSelected(defaultCaption, false)}
+                  className="text-xs font-medium text-accent hover:underline"
+                >
+                  Apply to all selected
+                </button>
+              ) : null}
+            </div>
+            <textarea
+              id="bulk-default-caption"
+              value={defaultCaption}
+              onChange={(e) => handleDefaultCaptionChange(e.target.value)}
+              onBlur={() => persistDefaultCaption(defaultCaption)}
+              rows={3}
+              placeholder="Used for every selected video. You can edit each one below."
+              className="w-full resize-y rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm outline-none ring-accent focus:ring-2"
+            />
+            <p className="text-xs text-muted">
+              Saved for this account. New selections pick this up automatically.
+            </p>
+          </div>
+
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm text-muted">
               {previewSlots.length} open slots · {exports.length} videos available
@@ -134,7 +291,7 @@ export function BulkScheduleModal({
               No finished videos available for this account.
             </p>
           ) : (
-            <ul className="max-h-64 space-y-2 overflow-y-auto">
+            <ul className="max-h-[min(24rem,50dvh)] space-y-2 overflow-y-auto">
               {exports.map((exp, index) => {
                 const checked = selected.includes(exp.id);
                 const slotIndex = selected.indexOf(exp.id);
@@ -143,46 +300,85 @@ export function BulkScheduleModal({
                   !checked &&
                   selected.length >= previewSlots.length &&
                   previewSlots.length > 0;
+                const isCustomized = customized.has(exp.id);
 
                 return (
                   <li key={exp.id}>
-                    <label
+                    <div
                       className={cn(
-                        "flex cursor-pointer items-center gap-3 rounded-xl border p-2",
+                        "rounded-xl border p-2",
                         checked
                           ? "border-accent bg-accent/10"
                           : "border-border bg-surface-raised",
-                        disabled && "cursor-not-allowed opacity-50",
+                        disabled && "opacity-50",
                       )}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggle(exp.id)}
-                        className="accent-accent"
-                      />
-                      <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg">
-                        <ReelPlayer
-                          size="xs"
-                          src={exp.url}
-                          controls={false}
-                          playsInline
-                          preload="metadata"
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{exp.name}</p>
-                        {checked && slot ? (
-                          <p className="text-xs text-muted">
-                            Slot {slotIndex + 1}: {slot.dateIso} ·{" "}
-                            {formatSlotTimeLabel(slot.time)}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted">Video {index + 1}</p>
+                      <label
+                        className={cn(
+                          "flex cursor-pointer items-center gap-3",
+                          disabled && "cursor-not-allowed",
                         )}
-                      </div>
-                    </label>
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggle(exp.id)}
+                          className="accent-accent"
+                        />
+                        <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg">
+                          <ReelPlayer
+                            size="xs"
+                            src={exp.url}
+                            controls={false}
+                            playsInline
+                            preload="metadata"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{exp.name}</p>
+                          {checked && slot ? (
+                            <p className="text-xs text-muted">
+                              Slot {slotIndex + 1}: {slot.dateIso} ·{" "}
+                              {formatSlotTimeLabel(slot.time)}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted">Video {index + 1}</p>
+                          )}
+                        </div>
+                      </label>
+
+                      {checked ? (
+                        <div className="mt-2 space-y-1.5 pl-7">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted">
+                              Description
+                              {isCustomized ? (
+                                <span className="ml-1 text-accent">· edited</span>
+                              ) : null}
+                            </span>
+                            {isCustomized ? (
+                              <button
+                                type="button"
+                                onClick={() => resetVideoCaption(exp.id)}
+                                className="text-xs text-muted hover:text-foreground"
+                              >
+                                Reset to default
+                              </button>
+                            ) : null}
+                          </div>
+                          <textarea
+                            value={captions[exp.id] ?? ""}
+                            onChange={(e) =>
+                              updateVideoCaption(exp.id, e.target.value)
+                            }
+                            rows={2}
+                            placeholder="Instagram caption for this video"
+                            className="w-full resize-y rounded-lg border border-border bg-surface px-2.5 py-2 text-sm outline-none ring-accent focus:ring-2"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                   </li>
                 );
               })}

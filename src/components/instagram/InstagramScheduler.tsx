@@ -372,6 +372,7 @@ export function InstagramScheduler() {
     dateIso: string;
     time: string;
     scheduledAt: string;
+    caption: string;
   }>) => {
     if (!activeAccountId) return;
     setBusy(true);
@@ -792,6 +793,7 @@ export function InstagramScheduler() {
 
       <BulkScheduleModal
         open={bulkModalOpen}
+        accountId={activeAccountId}
         accountUsername={activeAccount?.username ?? ""}
         exports={availableExports}
         previewSlots={bulkPreviewSlots}

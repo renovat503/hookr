@@ -28,6 +28,7 @@ type BulkAssignment = {
   dateIso?: string;
   time?: string;
   scheduledAt?: string;
+  caption?: string;
 };
 
 type BulkBody = {
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
           dateIso: item.dateIso?.trim() ?? "",
           time: item.time?.trim() ?? "",
           scheduledAt: item.scheduledAt?.trim() ?? "",
+          caption: item.caption?.trim() ?? "",
         }))
         .filter(
           (item) =>
@@ -91,7 +93,7 @@ export async function POST(request: Request) {
     const skipped: Array<{ exportId: string; reason: string }> = [];
 
     for (const assignment of assignments) {
-      const { exportId, dateIso, time, scheduledAt } = assignment;
+      const { exportId, dateIso, time, scheduledAt, caption } = assignment;
 
       if (!allowedTimes.has(time)) {
         skipped.push({ exportId, reason: "Time is not a posting goal slot." });
@@ -141,7 +143,7 @@ export async function POST(request: Request) {
         accountId,
         exportId,
         exportName: exp.name,
-        caption: buildQueueCaption(exp),
+        caption: caption || buildQueueCaption(exp),
         scheduledAt,
         status: "scheduled",
         source: "manual",
