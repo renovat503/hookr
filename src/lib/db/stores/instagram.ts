@@ -96,12 +96,23 @@ function rowToScheduledPost(
 }
 
 async function readMetaRow() {
-  const rows = await getDb()
-    .select()
-    .from(instagramMetaTable)
-    .where(eq(instagramMetaTable.id, META_ID))
-    .limit(1);
-  return rows[0] ?? null;
+  try {
+    const rows = await getDb()
+      .select()
+      .from(instagramMetaTable)
+      .where(eq(instagramMetaTable.id, META_ID))
+      .limit(1);
+    return rows[0] ?? null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause instanceof Error
+        ? err.cause.message
+        : null;
+    throw new Error(
+      `instagram_meta query failed${cause ? `: ${cause}` : ""}: ${message}`,
+    );
+  }
 }
 
 async function ensureMetaRow() {

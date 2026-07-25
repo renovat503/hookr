@@ -24,7 +24,15 @@ export async function register() {
 
   const tick = () => {
     void processInstagramDue().catch((err) => {
-      console.error("[hookr/auto-post]", err);
+      const message = err instanceof Error ? err.message : String(err);
+      const cause =
+        err instanceof Error && err.cause instanceof Error
+          ? err.cause.message
+          : null;
+      console.error(
+        "[hookr/auto-post]",
+        cause ? `${message} (${cause})` : message,
+      );
     });
   };
 

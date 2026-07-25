@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --experimental-https --experimental-https-key ./certificates/localhost-key.pem --experimental-https-cert ./certificates/localhost.pem",
     "build": "next build",
-    "start": "next start",
+    "postbuild": "node scripts/db-push-if-configured.mjs",
+    "start": "node scripts/ensure-instagram-meta.mjs && next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
