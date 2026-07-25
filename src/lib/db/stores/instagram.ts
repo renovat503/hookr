@@ -3,6 +3,7 @@ import { getAccountLastPublishedAt } from "@/lib/instagram-autopost";
 import { isInstagramRateLimitError } from "@/lib/instagram-errors";
 import { normalizePostingGoal } from "@/lib/posting-slots";
 import { getDb } from "@/lib/db/client";
+import { dbQuery } from "@/lib/db/query";
 import {
   instagramAccounts as instagramAccountsTable,
   instagramMeta as instagramMetaTable,
@@ -211,8 +212,11 @@ async function patchMetaRow(
 
 export async function readInstagramPg(): Promise<InstagramData> {
   const db = getDb();
-  const [accounts, posts, meta] = await Promise.all([
+  const accounts = await dbQuery(
     db.select().from(instagramAccountsTable),
+    "read instagram accounts",
+  );
+  const posts = await dbQuery(
     db
       .select()
       .from(scheduledPostsTable)
@@ -234,8 +238,9 @@ export async function readInstagramPg(): Promise<InstagramData> {
         ),
       )
       .orderBy(desc(scheduledPostsTable.createdAt)),
-    ensureMetaRow(),
-  ]);
+    "read instagram scheduled posts",
+  );
+  const meta = await dbQuery(ensureMetaRow(), "read instagram meta");
 
   return normalize({
     accounts: accounts.map(rowToAccount),

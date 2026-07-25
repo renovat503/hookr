@@ -8,6 +8,15 @@ import type { Campaign } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { cn } from "@/lib/utils";
 
+function friendlyFetchError(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const msg = err.message.toLowerCase();
+  if (msg.includes("timed out") || msg.includes("abort")) {
+    return "Database is slow right now. Wait a moment and try again.";
+  }
+  return err.message || fallback;
+}
+
 function CampaignsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,9 +45,7 @@ function CampaignsContent() {
       setCampaigns(json.campaigns ?? []);
       setActiveId(json.activeId ?? null);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not load campaigns.",
-      );
+      setError(friendlyFetchError(err, "Could not load campaigns."));
     } finally {
       setLoading(false);
     }

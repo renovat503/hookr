@@ -21,7 +21,9 @@ export async function register() {
   }
 
   const { ensureInstagramMeta } = await import("./lib/db/ensure-instagram-meta");
-  void ensureInstagramMeta();
+  setTimeout(() => {
+    void ensureInstagramMeta();
+  }, 15_000);
 
   const { processInstagramDue } = await import("./lib/process-instagram-due");
 

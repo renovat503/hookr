@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
+import { dbQuery } from "@/lib/db/query";
 import { campaigns as campaignsTable } from "@/lib/db/schema";
 import type { Campaign, CampaignsData } from "@/lib/types";
 import { DEFAULT_MUSIC_VOLUME } from "@/lib/constants";
@@ -35,10 +36,13 @@ function sanitizeBorrowedAssetIds(campaign: Campaign): Campaign {
 }
 
 export async function readCampaignsPg(): Promise<CampaignsData> {
-  const rows = await getDb()
-    .select()
-    .from(campaignsTable)
-    .orderBy(desc(campaignsTable.createdAt));
+  const rows = await dbQuery(
+    getDb()
+      .select()
+      .from(campaignsTable)
+      .orderBy(desc(campaignsTable.createdAt)),
+    "read campaigns",
+  );
   return {
     campaigns: rows.map((row) => sanitizeBorrowedAssetIds(rowToCampaign(row))),
   };

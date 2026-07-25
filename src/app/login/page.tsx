@@ -21,13 +21,20 @@ function LoginForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
+        signal: AbortSignal.timeout(30_000),
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error || "Login failed.");
       router.replace(next);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed.");
+      const msg =
+        err instanceof Error && err.name === "TimeoutError"
+          ? "Sign-in timed out. The server may be busy — try again in a moment."
+          : err instanceof Error
+            ? err.message
+            : "Login failed.";
+      setError(msg);
     } finally {
       setLoading(false);
     }

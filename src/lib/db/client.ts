@@ -21,9 +21,11 @@ export function getDb() {
       process.env.DATABASE_SSL === "require" ||
       process.env.NODE_ENV === "production";
 
+    const poolMax = isSupabasePoolerUrl(url) ? 1 : 5;
+
     client = postgres(url, {
       prepare: false,
-      max: 5,
+      max: poolMax,
       connect_timeout: 10,
       idle_timeout: 20,
       max_lifetime: 60 * 5,
@@ -39,5 +41,6 @@ export async function closeDb() {
     await client.end();
     client = null;
     db = null;
+    loggedConnection = false;
   }
 }
