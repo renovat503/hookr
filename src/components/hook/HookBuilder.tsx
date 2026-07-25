@@ -105,7 +105,8 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
   const [libraryCharacters, setLibraryCharacters] = useState<LibraryCharacter[]>(
     [],
   );
-  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [uploadingCharacter, setUploadingCharacter] = useState(false);
   const [formatPresets, setFormatPresets] = useState<FormatPreset[]>([]);
   const [savingPreset, setSavingPreset] = useState(false);
@@ -321,17 +322,27 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true);
+    setLibraryError(null);
     try {
-      const libRes = await fetch("/api/library?scope=create");
-      if (!libRes.ok) return;
+      const libRes = await fetch("/api/library?scope=create", {
+        signal: AbortSignal.timeout(20_000),
+      });
       const data = (await libRes.json()) as {
         characters?: LibraryCharacter[];
         motions?: LibraryMotion[];
+        error?: string;
       };
+      if (!libRes.ok) {
+        throw new Error(data.error || `Could not load library (${libRes.status})`);
+      }
       setLibraryCharacters(data.characters ?? []);
       setLibraryMotions(data.motions ?? []);
-    } catch {
-      // ignore — empty library UI handles this
+    } catch (err) {
+      setLibraryCharacters([]);
+      setLibraryMotions([]);
+      setLibraryError(
+        err instanceof Error ? err.message : "Could not load library.",
+      );
     } finally {
       setLibraryLoading(false);
     }
@@ -1044,6 +1055,18 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
           </div>
 
           <AnimatePresence mode="wait">
+            {libraryError ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                <span>{libraryError}</span>
+                <button
+                  type="button"
+                  onClick={() => void loadLibrary()}
+                  className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-100 hover:bg-red-500/10"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
             {value.characterSource === "upload" ? (
               <motion.div
                 key="characters"
@@ -1065,12 +1088,13 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
                 />
 
                 {libraryLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading characters…
+                  <div className="flex items-center gap-2 py-2 text-xs text-muted">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading saved characters…
                   </div>
-                ) : (
-                  <div className="space-y-3">
+                ) : null}
+
+                <div className="space-y-3">
                     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                       <li>
                         <button
@@ -1250,7 +1274,6 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
                       </button>
                     ) : null}
                   </div>
-                )}
 
                 {value.uploadedImageUrl ? (
                   <p className="text-xs text-muted">
@@ -1278,9 +1301,20 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
                 transition={{ duration: 0.2 }}
               >
                 {libraryLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                  <div className="flex items-center gap-2 py-8 text-xs text-muted">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     Loading motions…
+                  </div>
+                ) : libraryError ? (
+                  <div className="flex flex-wrap items-center gap-3 py-8 text-sm text-muted">
+                    <span>Could not load motions.</span>
+                    <button
+                      type="button"
+                      onClick={() => void loadLibrary()}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-hover"
+                    >
+                      Retry
+                    </button>
                   </div>
                 ) : libraryMotions.length === 0 ? (
                   <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-12 text-muted">
@@ -1400,6 +1434,17 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
               <div className="flex items-center gap-2 py-8 text-xs text-muted">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Loading motion library…
+              </div>
+            ) : libraryError ? (
+              <div className="flex flex-wrap items-center gap-3 py-8 text-sm text-muted">
+                <span>Could not load reference motions.</span>
+                <button
+                  type="button"
+                  onClick={() => void loadLibrary()}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-hover"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">

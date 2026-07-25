@@ -25,6 +25,8 @@ export function getDb() {
       prepare: false,
       max: 10,
       connect_timeout: 15,
+      idle_timeout: 20,
+      max_lifetime: 60 * 10,
       ...(needsSsl ? { ssl: "require" as const } : {}),
     });
     db = drizzle(client, { schema });

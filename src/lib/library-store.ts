@@ -30,6 +30,7 @@ import type {
   LibraryMotion,
   LibraryMusic,
 } from "./types";
+import { withTimeout } from "./with-timeout";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const MANIFEST_PATH = path.join(DATA_DIR, "library.json");
@@ -88,23 +89,34 @@ function scopeFromParam(raw: string | null): LibraryScope {
 
 export { scopeFromParam as parseLibraryScope };
 
+const LIBRARY_READ_TIMEOUT_MS = 12_000;
+
+async function readLibraryPgScoped(
+  scope: LibraryScope,
+): Promise<LibraryData> {
+  const run = async () => {
+    switch (scope) {
+      case "pickers":
+        return await readLibraryPgForPickers();
+      case "assets":
+        return await readLibraryPgForAssets();
+      case "exports":
+        return await readLibraryPgForExports();
+      case "create":
+        return await readLibraryPgForCreate();
+      default:
+        return await readLibraryPg();
+    }
+  };
+  return withTimeout(run(), LIBRARY_READ_TIMEOUT_MS, `Library read (${scope})`);
+}
+
 export async function readLibrary(
   scope: LibraryScope = "full",
 ): Promise<LibraryData> {
   if (usesPostgresRead()) {
     try {
-      switch (scope) {
-        case "pickers":
-          return await readLibraryPgForPickers();
-        case "assets":
-          return await readLibraryPgForAssets();
-        case "exports":
-          return await readLibraryPgForExports();
-        case "create":
-          return await readLibraryPgForCreate();
-        default:
-          return await readLibraryPg();
-      }
+      return await readLibraryPgScoped(scope);
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
