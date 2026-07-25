@@ -2,6 +2,7 @@ import {
   combineDateAndTime,
   formatDateIso,
   formatTimeInputValue,
+  getSchedulePartsInOffset,
   isPastDay,
   startOfDay,
   validateScheduleInstant,
@@ -106,16 +107,32 @@ export function getOccupiedSlotKeys(
   accountId: string,
   slotTimes: string[],
 ): Set<string> {
-  const allowed = new Set(slotTimes);
+  return getOccupiedSlotKeysInOffset(
+    posts,
+    accountId,
+    slotTimes,
+    new Date().getTimezoneOffset(),
+  );
+}
+
+export function getOccupiedSlotKeysInOffset(
+  posts: ScheduledPost[],
+  accountId: string,
+  slotTimes: string[],
+  timezoneOffsetMinutes: number,
+): Set<string> {
+  const allowed = new Set(normalizeSlotTimes(slotTimes));
   const occupied = new Set<string>();
   for (const post of posts) {
     if (post.accountId !== accountId || !OCCUPIED_STATUSES.has(post.status)) {
       continue;
     }
-    const dateIso = formatDateIso(new Date(post.scheduledAt));
-    const time = formatTimeInputValue(post.scheduledAt);
-    if (allowed.has(time)) {
-      occupied.add(slotKey(dateIso, time));
+    const parts = getSchedulePartsInOffset(
+      post.scheduledAt,
+      timezoneOffsetMinutes,
+    );
+    if (allowed.has(parts.time)) {
+      occupied.add(slotKey(parts.dateIso, parts.time));
     }
   }
   return occupied;
@@ -138,9 +155,11 @@ export function findPostForSlot(
       ) {
         return false;
       }
-      const postDate = formatDateIso(new Date(post.scheduledAt));
-      const postTime = formatTimeInputValue(post.scheduledAt);
-      return postDate === dateIso && postTime === time;
+      const parts = getSchedulePartsInOffset(
+        post.scheduledAt,
+        new Date().getTimezoneOffset(),
+      );
+      return parts.dateIso === dateIso && parts.time === time;
     }) ?? null
   );
 }

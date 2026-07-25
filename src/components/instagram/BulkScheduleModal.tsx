@@ -7,13 +7,20 @@ import { formatSlotTimeLabel, type ScheduleSlot } from "@/lib/posting-slots";
 import type { LibraryExport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+export type BulkScheduleAssignment = {
+  exportId: string;
+  dateIso: string;
+  time: string;
+  scheduledAt: string;
+};
+
 type BulkScheduleModalProps = {
   open: boolean;
   accountUsername: string;
   exports: LibraryExport[];
-  previewSlots: Array<Pick<ScheduleSlot, "dateIso" | "time">>;
+  previewSlots: ScheduleSlot[];
   onClose: () => void;
-  onConfirm: (exportIds: string[]) => void | Promise<void>;
+  onConfirm: (assignments: BulkScheduleAssignment[]) => void | Promise<void>;
 };
 
 export function BulkScheduleModal({
@@ -60,7 +67,20 @@ export function BulkScheduleModal({
     setBusy(true);
     setError(null);
     try {
-      await onConfirm(selected);
+      const assignments: BulkScheduleAssignment[] = selected
+        .map((exportId, index) => {
+          const slot = selectedPreview[index];
+          if (!slot) return null;
+          return {
+            exportId,
+            dateIso: slot.dateIso,
+            time: slot.time,
+            scheduledAt: slot.scheduledAt.toISOString(),
+          };
+        })
+        .filter((item): item is BulkScheduleAssignment => item !== null);
+
+      await onConfirm(assignments);
       setSelected([]);
       onClose();
     } catch (err) {

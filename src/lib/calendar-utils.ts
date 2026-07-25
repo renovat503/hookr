@@ -120,6 +120,30 @@ export function combineDateAndTime(dateIso: string, time: string): Date {
   return date;
 }
 
+/** Same as Date.getTimezoneOffset() from the browser (minutes west of UTC). */
+export function getSchedulePartsInOffset(
+  iso: string,
+  timezoneOffsetMinutes: number,
+): { dateIso: string; time: string } {
+  const shifted = new Date(new Date(iso).getTime() - timezoneOffsetMinutes * 60_000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getUTCDate()).padStart(2, "0");
+  const h = String(shifted.getUTCHours()).padStart(2, "0");
+  const min = String(shifted.getUTCMinutes()).padStart(2, "0");
+  return { dateIso: `${y}-${m}-${d}`, time: `${h}:${min}` };
+}
+
+export function schedulePartsMatchAssignment(
+  scheduledAt: string,
+  dateIso: string,
+  time: string,
+  timezoneOffsetMinutes: number,
+): boolean {
+  const parts = getSchedulePartsInOffset(scheduledAt, timezoneOffsetMinutes);
+  return parts.dateIso === dateIso && parts.time === time;
+}
+
 export function defaultScheduleTime(): string {
   const next = new Date();
   next.setMinutes(0, 0, 0);

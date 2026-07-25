@@ -378,7 +378,12 @@ export function InstagramScheduler() {
     }
   };
 
-  const bulkSchedule = async (exportIds: string[]) => {
+  const bulkSchedule = async (assignments: Array<{
+    exportId: string;
+    dateIso: string;
+    time: string;
+    scheduledAt: string;
+  }>) => {
     if (!activeAccountId) return;
     setBusy(true);
     setError(null);
@@ -386,7 +391,11 @@ export function InstagramScheduler() {
       const res = await fetch("/api/instagram/schedule/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, exportIds }),
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          assignments,
+          timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+        }),
       });
       const json = (await res.json()) as {
         error?: string;

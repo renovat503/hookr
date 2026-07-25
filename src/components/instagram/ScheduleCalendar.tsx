@@ -12,9 +12,8 @@ import {
   combineDateAndTime,
   DRAG_POST_MIME,
   DRAG_QUEUE_MIME,
-  formatDateIso,
   formatMonthYear,
-  formatTimeInputValue,
+  getSchedulePartsInOffset,
   getMonthGrid,
   isPastDay,
   isToday,
@@ -106,7 +105,10 @@ export function ScheduleCalendar({
     if (postId) {
       const post = posts.find((item) => item.id === postId);
       if (!post || !canDragPost(post)) return;
-      const sourceDay = formatDateIso(new Date(post.scheduledAt));
+      const sourceDay = getSchedulePartsInOffset(
+        post.scheduledAt,
+        new Date().getTimezoneOffset(),
+      ).dateIso;
       if (sourceDay === dayIso) return;
       await onPostReschedule(postId, dayDate);
     }
@@ -186,10 +188,12 @@ export function ScheduleCalendar({
             ) {
               return false;
             }
-            const dateIso = formatDateIso(new Date(post.scheduledAt));
-            if (dateIso !== day.iso) return false;
-            const time = formatTimeInputValue(post.scheduledAt);
-            return !slotTimes.includes(time);
+            const parts = getSchedulePartsInOffset(
+              post.scheduledAt,
+              new Date().getTimezoneOffset(),
+            );
+            if (parts.dateIso !== day.iso) return false;
+            return !slotTimes.includes(parts.time);
           });
 
           return (
@@ -339,10 +343,14 @@ export function ScheduleCalendar({
 
                 {orphanPosts.map((post) => {
                   const draggable = canDragPost(post);
+                  const parts = getSchedulePartsInOffset(
+                    post.scheduledAt,
+                    new Date().getTimezoneOffset(),
+                  );
                   const slot: ScheduleSlot = {
                     date: day.date,
                     dateIso: day.iso,
-                    time: formatTimeInputValue(post.scheduledAt),
+                    time: parts.time,
                     scheduledAt: new Date(post.scheduledAt),
                     key: `${post.id}-orphan`,
                   };
@@ -360,7 +368,7 @@ export function ScheduleCalendar({
                       )}
                     >
                       <span className="truncate font-medium">
-                        {formatSlotTimeLabel(formatTimeInputValue(post.scheduledAt))}
+                        {formatSlotTimeLabel(parts.time)}
                       </span>
                     </div>
                   );

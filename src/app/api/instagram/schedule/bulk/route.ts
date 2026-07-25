@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import {
+  schedulePartsMatchAssignment,
+  validateScheduleInstant,
+} from "@/lib/calendar-utils";
+import {
   addScheduledPost,
   isExportPublishedOnAccount,
   readInstagram,
@@ -10,36 +14,61 @@ import {
 } from "@/lib/instagram-queue";
 import { readLibrary } from "@/lib/library-store";
 import {
-  getNextAvailableSlots,
-  getOccupiedSlotKeys,
+  getOccupiedSlotKeysInOffset,
   getPostingGoalForAccount,
+  normalizeSlotTimes,
+  slotKey,
 } from "@/lib/posting-slots";
 import type { ScheduledPost } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+type BulkAssignment = {
+  exportId?: string;
+  dateIso?: string;
+  time?: string;
+  scheduledAt?: string;
+};
+
 type BulkBody = {
   accountId?: string;
   exportIds?: string[];
+  assignments?: BulkAssignment[];
+  timezoneOffsetMinutes?: number;
 };
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as BulkBody;
     const accountId = body.accountId?.trim();
-    const exportIds = (body.exportIds ?? [])
-      .map((id) => id.trim())
-      .filter(Boolean);
+    const timezoneOffsetMinutes = body.timezoneOffsetMinutes ?? 0;
 
-    if (!accountId || !exportIds.length) {
+    const assignments =
+      body.assignments
+        ?.map((item) => ({
+          exportId: item.exportId?.trim() ?? "",
+          dateIso: item.dateIso?.trim() ?? "",
+          time: item.time?.trim() ?? "",
+          scheduledAt: item.scheduledAt?.trim() ?? "",
+        }))
+        .filter(
+          (item) =>
+            item.exportId && item.dateIso && item.time && item.scheduledAt,
+        ) ?? [];
+
+    if (!accountId || !assignments.length) {
       return NextResponse.json(
-        { error: "accountId and exportIds are required." },
+        { error: "accountId and assignments are required." },
         { status: 400 },
       );
     }
 
-    const uniqueExportIds = [...new Set(exportIds)];
     const instagram = await readInstagram();
+    const goal = getPostingGoalForAccount(
+      instagram.accountPostingGoals,
+      accountId,
+    );
+    const allowedTimes = new Set(normalizeSlotTimes(goal.slotTimes));
     const account = instagram.accounts.find((item) => item.id === accountId);
     if (!account) {
       return NextResponse.json(
@@ -51,34 +80,48 @@ export async function POST(request: Request) {
     const library = await readLibrary();
     const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
     const reserved = getReservedExportIdsForAccount(instagram, accountId);
-    const goal = getPostingGoalForAccount(
-      instagram.accountPostingGoals,
-      accountId,
-    );
-    const occupied = getOccupiedSlotKeys(
+    const occupied = getOccupiedSlotKeysInOffset(
       instagram.scheduledPosts,
       accountId,
       goal.slotTimes,
+      timezoneOffsetMinutes,
     );
-    const slots = getNextAvailableSlots(
-      goal.slotTimes,
-      occupied,
-      uniqueExportIds.length,
-    );
-
-    if (slots.length < uniqueExportIds.length) {
-      return NextResponse.json(
-        {
-          error: `Not enough open slots. Found ${slots.length} for ${uniqueExportIds.length} videos.`,
-        },
-        { status: 409 },
-      );
-    }
 
     const scheduled: ScheduledPost[] = [];
     const skipped: Array<{ exportId: string; reason: string }> = [];
 
-    for (const [index, exportId] of uniqueExportIds.entries()) {
+    for (const assignment of assignments) {
+      const { exportId, dateIso, time, scheduledAt } = assignment;
+
+      if (!allowedTimes.has(time)) {
+        skipped.push({ exportId, reason: "Time is not a posting goal slot." });
+        continue;
+      }
+
+      const scheduleError = validateScheduleInstant(new Date(scheduledAt));
+      if (scheduleError) {
+        skipped.push({ exportId, reason: scheduleError });
+        continue;
+      }
+
+      if (
+        !schedulePartsMatchAssignment(
+          scheduledAt,
+          dateIso,
+          time,
+          timezoneOffsetMinutes,
+        )
+      ) {
+        skipped.push({ exportId, reason: "Slot time does not match schedule." });
+        continue;
+      }
+
+      const key = slotKey(dateIso, time);
+      if (occupied.has(key)) {
+        skipped.push({ exportId, reason: "Slot is already taken." });
+        continue;
+      }
+
       const exp = exportById.get(exportId);
       if (!exp || exp.status !== "ready") {
         skipped.push({ exportId, reason: "Finished video not found." });
@@ -93,14 +136,13 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const slot = slots[index];
       const post: ScheduledPost = {
-        id: `sched-bulk-${Date.now()}-${index}`,
+        id: `sched-bulk-${Date.now()}-${scheduled.length}`,
         accountId,
         exportId,
         exportName: exp.name,
         caption: buildQueueCaption(exp),
-        scheduledAt: slot.scheduledAt.toISOString(),
+        scheduledAt,
         status: "scheduled",
         source: "manual",
         createdAt: new Date().toISOString(),
@@ -108,6 +150,7 @@ export async function POST(request: Request) {
 
       await addScheduledPost(post);
       reserved.add(exportId);
+      occupied.add(key);
       scheduled.push(post);
     }
 
