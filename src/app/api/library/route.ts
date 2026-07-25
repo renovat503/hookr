@@ -9,10 +9,10 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
-    const scope = parseLibraryScope(
-      new URL(request.url).searchParams.get("scope"),
-    );
-    const library = await readLibrary(scope);
+    const params = new URL(request.url).searchParams;
+    const scope = parseLibraryScope(params.get("scope"));
+    const campaignId = params.get("campaignId")?.trim() || null;
+    const library = await readLibrary(scope, { campaignId });
     return NextResponse.json(library);
   } catch (err) {
     console.error("[library] GET failed", err);

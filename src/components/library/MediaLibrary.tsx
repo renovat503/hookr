@@ -126,28 +126,46 @@ export function MediaLibrary({
     setLoading(true);
     setError(null);
     try {
-      const [libRes, expRes, capRes, campRes] = await Promise.all([
-        fetch("/api/library?scope=assets", { signal: AbortSignal.timeout(20_000) }),
-        fetch("/api/library?scope=exports", { signal: AbortSignal.timeout(20_000) }),
-        fetch("/api/library/captions", { signal: AbortSignal.timeout(20_000) }),
-        fetch("/api/campaigns", { signal: AbortSignal.timeout(20_000) }),
-      ]);
-      if (!libRes.ok) throw new Error("Could not load library.");
-      setData((await libRes.json()) as LibraryData);
-      if (expRes.ok) {
-        const expJson = (await expRes.json()) as LibraryData;
-        setExports(expJson.exports ?? []);
-      }
+      const campRes = await fetch("/api/campaigns", {
+        signal: AbortSignal.timeout(20_000),
+      });
+      let activeId: string | null = null;
       if (campRes.ok) {
         const campJson = (await campRes.json()) as {
           campaigns?: Campaign[];
           activeId?: string | null;
         };
         setCampaigns(campJson.campaigns ?? []);
-        const active = campJson.activeId
-          ? campJson.campaigns?.find((c) => c.id === campJson.activeId) ?? null
+        activeId = campJson.activeId ?? null;
+        const active = activeId
+          ? campJson.campaigns?.find((c) => c.id === activeId) ?? null
           : null;
         setActiveCampaign(active);
+      }
+
+      const assetsUrl = activeId
+        ? `/api/library?scope=assets&campaignId=${encodeURIComponent(activeId)}`
+        : "/api/library?scope=assets";
+
+      const [libRes, expRes, capRes] = await Promise.all([
+        fetch(assetsUrl, { signal: AbortSignal.timeout(30_000) }),
+        fetch("/api/library?scope=exports", {
+          signal: AbortSignal.timeout(20_000),
+        }),
+        fetch("/api/library/captions", {
+          signal: AbortSignal.timeout(20_000),
+        }),
+      ]);
+      if (!libRes.ok) {
+        const body = (await libRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error ?? "Could not load library.");
+      }
+      setData((await libRes.json()) as LibraryData);
+      if (expRes.ok) {
+        const expJson = (await expRes.json()) as LibraryData;
+        setExports(expJson.exports ?? []);
       }
       if (capRes.ok) {
         const capJson = (await capRes.json()) as {

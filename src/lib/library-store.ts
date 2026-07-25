@@ -93,16 +93,22 @@ function scopeFromParam(raw: string | null): LibraryScope {
 export { scopeFromParam as parseLibraryScope };
 
 const LIBRARY_READ_TIMEOUT_MS = 12_000;
+const LIBRARY_ASSETS_READ_TIMEOUT_MS = 25_000;
+
+type ReadLibraryOptions = {
+  campaignId?: string | null;
+};
 
 async function readLibraryPgScoped(
   scope: LibraryScope,
+  options?: ReadLibraryOptions,
 ): Promise<LibraryData> {
   const run = async () => {
     switch (scope) {
       case "pickers":
         return await readLibraryPgForPickers();
       case "assets":
-        return await readLibraryPgForAssets();
+        return await readLibraryPgForAssets(options?.campaignId);
       case "exports":
         return await readLibraryPgForExports();
       case "create":
@@ -113,7 +119,9 @@ async function readLibraryPgScoped(
         return await readLibraryPg();
     }
   };
-  return withTimeout(run(), LIBRARY_READ_TIMEOUT_MS, `Library read (${scope})`);
+  const timeoutMs =
+    scope === "assets" ? LIBRARY_ASSETS_READ_TIMEOUT_MS : LIBRARY_READ_TIMEOUT_MS;
+  return withTimeout(run(), timeoutMs, `Library read (${scope})`);
 }
 
 function normalizeLibrary(data: LibraryData): LibraryData {
@@ -151,11 +159,12 @@ function normalizeLibrary(data: LibraryData): LibraryData {
 
 export async function readLibrary(
   scope: LibraryScope = "full",
+  options?: ReadLibraryOptions,
 ): Promise<LibraryData> {
   let data: LibraryData;
   if (usesPostgresRead()) {
     try {
-      data = await readLibraryPgScoped(scope);
+      data = await readLibraryPgScoped(scope, options);
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
@@ -165,6 +174,12 @@ export async function readLibrary(
   } else {
     data = await readLibraryJson();
     data = scopeLibraryFromJson(data, scope);
+  }
+  if (options?.campaignId && scope === "assets") {
+    data = {
+      ...data,
+      hooks: data.hooks.filter((h) => h.campaignId === options.campaignId),
+    };
   }
   return normalizeLibrary(data);
 }

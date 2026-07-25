@@ -148,11 +148,21 @@ export async function readLibraryPgForPickers(): Promise<LibraryData> {
 }
 
 /** Library tabs — no finished exports payload. */
-export async function readLibraryPgForAssets(): Promise<LibraryData> {
+export async function readLibraryPgForAssets(
+  campaignId?: string | null,
+): Promise<LibraryData> {
   const db = getDb();
+  const hookQuery = campaignId
+    ? db
+        .select()
+        .from(hooksTable)
+        .where(eq(hooksTable.campaignId, campaignId))
+        .orderBy(desc(hooksTable.createdAt))
+    : Promise.resolve([] as (typeof hooksTable.$inferSelect)[]);
+
   const [hookRows, demoRows, motionRows, musicRows, characterRows] =
     await Promise.all([
-      db.select().from(hooksTable).orderBy(desc(hooksTable.createdAt)),
+      hookQuery,
       db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
       db.select().from(motionsTable).orderBy(desc(motionsTable.uploadedAt)),
       db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
