@@ -1,10 +1,11 @@
 import { stat } from "fs/promises";
 import path from "path";
+import { instagramRedirectUri, resolveAppUrl } from "./app-url";
 
 const IG_GRAPH = "https://graph.instagram.com/v21.0";
 const IG_OAUTH = "https://api.instagram.com/oauth/access_token";
 
-export function getInstagramConfig() {
+export function getInstagramConfig(request?: Request) {
   // Instagram Login uses Instagram App ID/Secret from:
   // App Dashboard → Instagram → API setup with Instagram login → Business login settings
   // Falls back to META_* for convenience if INSTAGRAM_* is unset.
@@ -16,23 +17,19 @@ export function getInstagramConfig() {
     process.env.INSTAGRAM_APP_SECRET?.trim() ||
     process.env.META_APP_SECRET?.trim() ||
     "";
-  const appUrl = (
-    process.env.APP_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
+  const appUrl = resolveAppUrl(request);
 
   return {
     appId,
     appSecret,
     appUrl,
-    redirectUri: `${appUrl}/api/instagram/callback`,
+    redirectUri: instagramRedirectUri(appUrl),
     configured: Boolean(appId && appSecret),
   };
 }
 
-export function buildInstagramAuthUrl(state: string) {
-  const { appId, redirectUri } = getInstagramConfig();
+export function buildInstagramAuthUrl(state: string, redirectUri: string) {
+  const { appId } = getInstagramConfig();
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: redirectUri,
@@ -82,8 +79,11 @@ async function igPost<T>(
   return json;
 }
 
-export async function exchangeCodeForLongLivedToken(code: string) {
-  const { appId, appSecret, redirectUri } = getInstagramConfig();
+export async function exchangeCodeForLongLivedToken(
+  code: string,
+  redirectUri: string,
+) {
+  const { appId, appSecret } = getInstagramConfig();
   const cleanCode = code.replace(/#_+$/, "");
 
   const form = new FormData();

@@ -24,9 +24,9 @@ import { formatPgError } from "@/lib/db/connection-url";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const config = getInstagramConfig();
+    const config = getInstagramConfig(request);
     const mediaBase = getPublicMediaBaseUrl();
     const instagram = await readInstagram();
     const library = await readLibrary("exports");

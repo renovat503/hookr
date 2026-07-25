@@ -401,8 +401,17 @@ export function InstagramScheduler() {
               <div>
                 <h3 className="font-display text-lg font-semibold">Accounts</h3>
                 <p className="mt-1 text-sm text-muted">
-                  Professional Instagram accounts linked to a Facebook Page.
+                  Professional Instagram accounts linked via Instagram Login.
                 </p>
+                {data.redirectUri ? (
+                  <p className="mt-2 text-xs text-muted">
+                    Add this exact OAuth redirect URI in Meta → Instagram → API
+                    setup → Business login settings →{" "}
+                    <span className="font-mono text-foreground">
+                      {data.redirectUri}
+                    </span>
+                  </p>
+                ) : null}
               </div>
               <a
                 href="/api/instagram/auth"

@@ -10,7 +10,7 @@ import type { InstagramAccount } from "@/lib/types";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const config = getInstagramConfig();
+  const config = getInstagramConfig(request);
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
@@ -32,11 +32,18 @@ export async function GET(request: Request) {
   }
 
   const cookieHeader = request.headers.get("cookie") || "";
-  const expected = cookieHeader
+  const cookieParts = cookieHeader
     .split(";")
-    .map((c) => c.trim())
+    .map((c) => c.trim());
+  const expected = cookieParts
     .find((c) => c.startsWith("ig_oauth_state="))
     ?.split("=")[1];
+  const redirectUri =
+    cookieParts
+      .find((c) => c.startsWith("ig_oauth_redirect="))
+      ?.split("=")
+      .slice(1)
+      .join("=") || config.redirectUri;
 
   if (!expected || expected !== state) {
     return NextResponse.redirect(
@@ -46,7 +53,7 @@ export async function GET(request: Request) {
 
   try {
     const { accessToken, expiresIn, userId } =
-      await exchangeCodeForLongLivedToken(code);
+      await exchangeCodeForLongLivedToken(code, redirectUri);
     const discovered = await discoverInstagramAccounts(accessToken, userId);
 
     if (!discovered.length) {
@@ -76,6 +83,7 @@ export async function GET(request: Request) {
       `${redirectBase}?connected=${accounts.length}`,
     );
     response.cookies.set("ig_oauth_state", "", { path: "/", maxAge: 0 });
+    response.cookies.set("ig_oauth_redirect", "", { path: "/", maxAge: 0 });
     return response;
   } catch (err) {
     const message =
