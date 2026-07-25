@@ -234,7 +234,10 @@ export type InstagramAccount = {
   tokenExpiresAt?: string | null;
 };
 
+export type ScheduledPostSource = "manual" | "queue" | "auto";
+
 export type ScheduledPostStatus =
+  | "queued"
   | "scheduled"
   | "publishing"
   | "published"
@@ -250,6 +253,9 @@ export type ScheduledPost = {
   caption: string;
   scheduledAt: string;
   status: ScheduledPostStatus;
+  source?: ScheduledPostSource;
+  /** Order within an account queue (lower = publishes first) */
+  queuePosition?: number | null;
   createdAt: string;
   publishedAt?: string | null;
   publishedMediaId?: string | null;

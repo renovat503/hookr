@@ -23,6 +23,14 @@ export async function ensureInstagramMeta(): Promise<void> {
       values ('default')
       on conflict (id) do nothing
     `);
+    await getDb().execute(sql`
+      alter table scheduled_posts
+      add column if not exists source text not null default 'manual'
+    `);
+    await getDb().execute(sql`
+      alter table scheduled_posts
+      add column if not exists queue_position integer
+    `);
     console.log("[db] instagram_meta ready.");
   } catch (err) {
     console.warn(

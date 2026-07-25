@@ -11,6 +11,7 @@ import type {
   InstagramAccount,
   InstagramData,
   ScheduledPost,
+  ScheduledPostSource,
 } from "@/lib/types";
 
 const META_ID = "default";
@@ -88,6 +89,8 @@ function rowToScheduledPost(
     caption: row.caption,
     scheduledAt: row.scheduledAt,
     status: row.status as ScheduledPost["status"],
+    source: (row.source as ScheduledPostSource | null) ?? undefined,
+    queuePosition: row.queuePosition ?? undefined,
     createdAt: row.createdAt,
     publishedAt: row.publishedAt,
     publishedMediaId: row.publishedMediaId,
@@ -179,6 +182,8 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
         caption: post.caption,
         scheduledAt: post.scheduledAt,
         status: post.status,
+        source: post.source ?? "manual",
+        queuePosition: post.queuePosition ?? null,
         createdAt: post.createdAt,
         publishedAt: post.publishedAt,
         publishedMediaId: post.publishedMediaId,
@@ -227,7 +232,8 @@ export async function removeInstagramAccountPg(id: string): Promise<void> {
   data.accounts = data.accounts.filter((a) => a.id !== id);
   delete data.accountLastPublishedAt[id];
   data.scheduledPosts = data.scheduledPosts.map((post) =>
-    post.accountId === id && post.status === "scheduled"
+    post.accountId === id &&
+    (post.status === "scheduled" || post.status === "queued")
       ? {
           ...post,
           status: "cancelled" as const,
@@ -306,6 +312,34 @@ export async function updateScheduledPostPg(
   data.scheduledPosts[idx] = { ...data.scheduledPosts[idx], ...patch };
   await writeInstagramPg(data);
   return data.scheduledPosts[idx];
+}
+
+export async function markExportPublishedOnAccountPg(
+  accountId: string,
+  exportId: string,
+) {
+  const data = await readInstagramPg();
+  if (!data.publishedExportIds.includes(exportId)) {
+    data.publishedExportIds.push(exportId);
+  }
+  data.scheduledPosts = data.scheduledPosts.map((post) => {
+    if (
+      post.accountId === accountId &&
+      post.exportId === exportId &&
+      (post.status === "queued" ||
+        post.status === "scheduled" ||
+        post.status === "failed")
+    ) {
+      return {
+        ...post,
+        status: "cancelled" as const,
+        error: "Video already published on this account",
+      };
+    }
+    return post;
+  });
+  await writeInstagramPg(data);
+  return data;
 }
 
 export async function markExportPublishedPg(exportId: string) {

@@ -2,15 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   CalendarClock,
   CheckCircle2,
+  ChevronRight,
   Link2,
+  ListOrdered,
   Loader2,
+  Plus,
   Send,
   Share2,
   Timer,
   Trash2,
   Unplug,
+  Video,
   XCircle,
 } from "lucide-react";
 import { ReelPlayer, reelFrameClass } from "@/components/ui/ReelPlayer";
@@ -28,12 +34,23 @@ type PublicAccount = {
   tokenExpiresAt?: string | null;
 };
 
+type QueueItem = ScheduledPost & {
+  exportUrl?: string | null;
+};
+
+type AccountQueue = {
+  queue: QueueItem[];
+  available: LibraryExport[];
+  publishedCount: number;
+};
+
 type AutoPostAccountStatus = {
   id: string;
   username: string;
   lastPublishedAt: string | null;
   nextEligibleAt: string | null;
   canPostNow: boolean;
+  queueLength?: number;
 };
 
 type InstagramPayload = {
@@ -44,16 +61,18 @@ type InstagramPayload = {
   accounts: PublicAccount[];
   scheduledPosts: ScheduledPost[];
   exports: LibraryExport[];
+  queues: Record<string, AccountQueue>;
   autoPost?: {
     enabled: boolean;
     intervalHours?: 4 | 5 | 6;
     intervalOptions?: Array<4 | 5 | 6>;
     intervalMs?: number;
     intervalLabel?: string;
-    unpublishedCount: number;
     next?: {
       exportId: string | null;
       exportName: string | null;
+      accountId?: string | null;
+      accountUsername?: string | null;
       postsAt: string | null;
       eligibleNow: boolean;
     };
@@ -77,7 +96,6 @@ function toLocalInputValue(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** mm:ss (or hh:mm:ss) countdown until auto-post */
 function formatPostCountdown(
   postsAt: string | null,
   eligibleNow: boolean,
@@ -108,9 +126,10 @@ export function InstagramScheduler() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-
-  const [accountId, setAccountId] = useState("");
-  const [exportId, setExportId] = useState("");
+  const [activeAccountId, setActiveAccountId] = useState("");
+  const [previewExportId, setPreviewExportId] = useState("");
+  const [scheduleAccountId, setScheduleAccountId] = useState("");
+  const [scheduleExportId, setScheduleExportId] = useState("");
   const [caption, setCaption] = useState("");
   const [scheduledAt, setScheduledAt] = useState(() => {
     const d = new Date(Date.now() + 60 * 60 * 1000);
@@ -126,9 +145,16 @@ export function InstagramScheduler() {
       const json = (await res.json()) as InstagramPayload & { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not load Instagram.");
       setData(json);
-      setAccountId((current) => current || json.accounts[0]?.id || "");
-      setExportId((current) => {
-        if (current && json.exports.some((e) => e.id === current)) {
+      setActiveAccountId((current) => current || json.accounts[0]?.id || "");
+      setScheduleAccountId((current) => current || json.accounts[0]?.id || "");
+      setPreviewExportId((current) => {
+        if (current && json.exports.some((exp) => exp.id === current)) {
+          return current;
+        }
+        return json.exports[0]?.id || "";
+      });
+      setScheduleExportId((current) => {
+        if (current && json.exports.some((exp) => exp.id === current)) {
           return current;
         }
         return json.exports[0]?.id || "";
@@ -163,16 +189,6 @@ export function InstagramScheduler() {
   }, [data?.autoPost?.enabled]);
 
   useEffect(() => {
-    const selected = data?.exports.find((e) => e.id === exportId);
-    if (selected) {
-      setCaption(
-        [selected.overlayText, `#hookr`].filter(Boolean).join("\n\n"),
-      );
-    }
-  }, [data?.exports, exportId]);
-
-  // Process any due posts while this page is open
-  useEffect(() => {
     let cancelled = false;
     const tick = async () => {
       try {
@@ -194,10 +210,91 @@ export function InstagramScheduler() {
     };
   }, [load]);
 
-  const selectedExport = useMemo(
-    () => data?.exports.find((e) => e.id === exportId) ?? null,
-    [data, exportId],
+  const activeAccount = useMemo(
+    () => data?.accounts.find((account) => account.id === activeAccountId) ?? null,
+    [data, activeAccountId],
   );
+
+  const activeQueue = useMemo(
+    () => (activeAccountId ? data?.queues?.[activeAccountId] : null) ?? null,
+    [data, activeAccountId],
+  );
+
+  const previewExport = useMemo(
+    () => data?.exports.find((exp) => exp.id === previewExportId) ?? null,
+    [data, previewExportId],
+  );
+
+  const addToQueue = async (accountId: string, exportId: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/instagram/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, exportId }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not add to queue.");
+      setActiveAccountId(accountId);
+      setPreviewExportId(exportId);
+      setNotice("Added to queue.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add to queue.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeFromQueue = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/instagram/queue?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not remove from queue.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove from queue.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const moveQueueItem = async (
+    accountId: string,
+    queue: QueueItem[],
+    index: number,
+    direction: -1 | 1,
+  ) => {
+    const target = index + direction;
+    if (target < 0 || target >= queue.length) return;
+    const orderedIds = queue.map((item) => item.id);
+    [orderedIds[index], orderedIds[target]] = [
+      orderedIds[target],
+      orderedIds[index],
+    ];
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/instagram/queue", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, orderedIds }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not reorder queue.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reorder queue.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const disconnect = async (id: string) => {
     setBusy(true);
@@ -218,7 +315,7 @@ export function InstagramScheduler() {
   };
 
   const schedule = async (publishNow: boolean) => {
-    if (!accountId || !exportId) return;
+    if (!scheduleAccountId || !scheduleExportId) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -227,8 +324,8 @@ export function InstagramScheduler() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accountId,
-          exportId,
+          accountId: scheduleAccountId,
+          exportId: scheduleExportId,
           caption,
           scheduledAt: publishNow
             ? new Date().toISOString()
@@ -328,53 +425,22 @@ export function InstagramScheduler() {
           Instagram
         </h2>
         <p className="mt-2 max-w-2xl text-sm text-muted">
-          Connect Instagram Business or Creator accounts, schedule Reels
-          manually, or let Hookr auto-post the oldest finished video every{" "}
-          {data?.autoPost?.intervalLabel ?? "5 hours"} per account while this
-          app is running.
+          Build a separate publishing queue for each Instagram account. Pick
+          finished videos and add them to the channel you want, then auto-post
+          drains each account&apos;s queue on its own schedule.
         </p>
-        {data ? (
-          <p className="mt-2 text-sm text-muted">
-            <span className="font-medium text-foreground">
-              {data.exports.length}
-            </span>{" "}
-            finished video{data.exports.length === 1 ? "" : "s"} ready to
-            schedule
-            {data.exports.length === 0
-              ? " — create more in Produce or view all in Library → Exports."
-              : "."}
-          </p>
-        ) : null}
       </div>
 
-      {error && (
+      {error ? (
         <p className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </p>
-      )}
-      {notice && (
+      ) : null}
+      {notice ? (
         <p className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
           {notice}
         </p>
-      )}
-
-      {data?.autoPost?.rateLimitedNow && data.autoPost.rateLimitedUntil && (
-        <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-          Instagram rate limit reached. Auto-post is paused until{" "}
-          {formatWhen(data.autoPost.rateLimitedUntil)} — the same video will
-          retry automatically after that.
-        </p>
-      )}
-
-      {data?.configured && data.canPublishMedia === false && (
-        <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-          Publishing needs a public HTTPS video URL — Meta cannot fetch
-          localhost. Set{" "}
-          <code className="text-accent">INSTAGRAM_MEDIA_BASE_URL</code> to a
-          tunnel that serves <code className="text-accent">/public</code> (see
-          .env.local.example).
-        </p>
-      )}
+      ) : null}
 
       {!data?.configured ? (
         <section className="rounded-2xl border border-border bg-surface/70 p-5">
@@ -384,28 +450,9 @@ export function InstagramScheduler() {
               Connect Meta app
             </h3>
           </div>
-          <p className="mb-4 text-sm text-muted">
-            Add these to <code className="text-foreground">.env.local</code>.
-            Use the <span className="text-foreground">Instagram App ID</span>{" "}
-            and <span className="text-foreground">Instagram App Secret</span>{" "}
-            from Meta → Instagram → API setup with Instagram login → Business
-            login settings (not the Facebook App ID unless they match).
-          </p>
-          <ul className="space-y-2 rounded-xl border border-border bg-surface-raised p-4 font-mono text-xs text-foreground">
-            <li>INSTAGRAM_APP_ID=your_instagram_app_id</li>
-            <li>INSTAGRAM_APP_SECRET=your_instagram_app_secret</li>
-            <li>
-              APP_URL=
-              {typeof window !== "undefined"
-                ? window.location.origin
-                : "http://localhost:3000"}
-            </li>
-          </ul>
-          <p className="mt-3 text-xs text-muted">
-            OAuth redirect URI (exact match):{" "}
-            <span className="font-mono text-foreground">
-              {data?.redirectUri}
-            </span>
+          <p className="text-sm text-muted">
+            Add Instagram app credentials to <code>.env.local</code>, then connect
+            your accounts below.
           </p>
         </section>
       ) : (
@@ -415,17 +462,8 @@ export function InstagramScheduler() {
               <div>
                 <h3 className="font-display text-lg font-semibold">Accounts</h3>
                 <p className="mt-1 text-sm text-muted">
-                  Professional Instagram accounts linked via Instagram Login.
+                  Each account gets its own queue and posting schedule.
                 </p>
-                {data.redirectUri ? (
-                  <p className="mt-2 text-xs text-muted">
-                    Add this exact OAuth redirect URI in Meta → Instagram → API
-                    setup → Business login settings →{" "}
-                    <span className="font-mono text-foreground">
-                      {data.redirectUri}
-                    </span>
-                  </p>
-                ) : null}
               </div>
               <a
                 href="/api/instagram/auth"
@@ -441,227 +479,333 @@ export function InstagramScheduler() {
                 No accounts connected yet.
               </p>
             ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
-                {data.accounts.map((account) => (
-                  <li
-                    key={account.id}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised p-3"
-                  >
-                    {account.profilePictureUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={account.profilePictureUrl}
-                        alt=""
-                        className="h-11 w-11 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/15 text-accent">
-                        <Share2 className="h-5 w-5" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">
-                        @{account.username}
-                      </p>
-                      <p className="truncate text-[11px] text-muted">
-                        via {account.pageName}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void disconnect(account.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted hover:text-danger"
+              <div className="flex flex-wrap gap-2">
+                {data.accounts.map((account) => {
+                  const queueLength = data.queues?.[account.id]?.queue.length ?? 0;
+                  const selected = account.id === activeAccountId;
+                  return (
+                    <div
+                      key={account.id}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-xl border px-2 py-1.5 text-sm transition-colors",
+                        selected
+                          ? "border-accent bg-accent/10 text-foreground"
+                          : "border-border bg-surface-raised text-muted",
+                      )}
                     >
-                      <Unplug className="h-3.5 w-3.5" />
-                      Disconnect
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAccountId(account.id)}
+                        className="inline-flex items-center gap-2 px-1 py-0.5"
+                      >
+                        {account.profilePictureUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={account.profilePictureUrl}
+                            alt=""
+                            className="h-7 w-7 rounded-full object-cover"
+                          />
+                        ) : (
+                          <Share2 className="h-4 w-4 text-accent" />
+                        )}
+                        <span className="font-medium">@{account.username}</span>
+                        <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-semibold text-muted">
+                          {queueLength} queued
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void disconnect(account.id)}
+                        className="rounded-md p-1 text-muted hover:text-danger"
+                        aria-label={`Disconnect @${account.username}`}
+                      >
+                        <Unplug className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </section>
 
-          {data.accounts.length > 0 && data.autoPost ? (
-            <section className="rounded-2xl border border-border bg-surface/70 p-5">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Timer className="h-4 w-4 text-accent" />
-                    <h3 className="font-display text-lg font-semibold">
-                      Auto-post
-                    </h3>
+          {data.accounts.length > 0 ? (
+            <>
+              <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-border bg-surface/70 p-5">
+                    <div className="mb-4 flex items-center gap-2">
+                      <Video className="h-4 w-4 text-accent" />
+                      <h3 className="font-display text-lg font-semibold">
+                        Finished videos
+                      </h3>
+                    </div>
+                    {!data.exports.length ? (
+                      <p className="text-sm text-muted">
+                        No finished videos yet. Create exports in Produce or
+                        browse Library → Exports.
+                      </p>
+                    ) : (
+                      <ul className="grid gap-3 sm:grid-cols-2">
+                        {data.exports.map((exp) => (
+                          <li
+                            key={exp.id}
+                            className={cn(
+                              "overflow-hidden rounded-xl border bg-surface-raised",
+                              previewExportId === exp.id
+                                ? "border-accent/50"
+                                : "border-border",
+                            )}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setPreviewExportId(exp.id)}
+                              className="block w-full text-left"
+                            >
+                              <ReelPlayer
+                                size="sm"
+                                src={exp.url}
+                                controls={false}
+                                playsInline
+                                preload="metadata"
+                              />
+                              <div className="space-y-1 px-3 py-2">
+                                <p className="truncate text-sm font-medium">
+                                  {exp.name}
+                                </p>
+                                <p className="text-[11px] text-muted">
+                                  {formatWhen(exp.createdAt)}
+                                </p>
+                              </div>
+                            </button>
+                            <div className="border-t border-border px-3 py-2">
+                              <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted">
+                                Add to queue
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {data.accounts.map((account) => {
+                                  const available = data.queues?.[
+                                    account.id
+                                  ]?.available.some((item) => item.id === exp.id);
+                                  const inQueue = data.queues?.[
+                                    account.id
+                                  ]?.queue.some((item) => item.exportId === exp.id);
+                                  return (
+                                    <button
+                                      key={account.id}
+                                      type="button"
+                                      disabled={busy || !available || inQueue}
+                                      onClick={() =>
+                                        void addToQueue(account.id, exp.id)
+                                      }
+                                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium disabled:opacity-40"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      @{account.username}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  <p className="mt-1 text-sm text-muted">
-                    Each account posts the oldest unpublished finished video on
-                    your chosen schedule. Keep this page open (or the dev server
-                    running) for automatic publishing.
-                  </p>
-                </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={data.autoPost.enabled}
-                    disabled={busy}
-                    onChange={(e) =>
-                      void updateAutoPost({ enabled: e.target.checked })
-                    }
-                    className="accent-accent"
-                  />
-                  Enabled
-                </label>
-              </div>
 
-              <div className="mb-4 space-y-2">
-                <p className="text-xs font-medium text-muted">Post every</p>
-                <div className="flex flex-wrap gap-2">
-                  {(data.autoPost.intervalOptions ?? [4, 5, 6]).map(
-                    (hours) => (
-                      <button
-                        key={hours}
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void updateAutoPost({ intervalHours: hours })
-                        }
+                  <div className="rounded-2xl border border-border bg-surface/70 p-5">
+                    <div className="mb-4 flex items-center gap-2">
+                      <ListOrdered className="h-4 w-4 text-accent" />
+                      <h3 className="font-display text-lg font-semibold">
+                        {activeAccount
+                          ? `@${activeAccount.username} queue`
+                          : "Account queue"}
+                      </h3>
+                    </div>
+                    {!activeQueue?.queue.length ? (
+                      <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted">
+                        No videos queued for this account yet. Add finished
+                        videos above.
+                      </p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {activeQueue.queue.map((item, index) => (
+                          <li
+                            key={item.id}
+                            className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-raised p-3"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-sm font-semibold text-accent">
+                              {index + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium">
+                                {item.exportName || item.exportId}
+                              </p>
+                              <p className="text-xs text-muted">
+                                Added {formatWhen(item.createdAt)}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={busy || index === 0}
+                                onClick={() =>
+                                  void moveQueueItem(
+                                    activeAccountId,
+                                    activeQueue.queue,
+                                    index,
+                                    -1,
+                                  )
+                                }
+                                className="rounded-lg border border-border p-2 text-muted disabled:opacity-40"
+                              >
+                                <ArrowUp className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  busy || index === activeQueue.queue.length - 1
+                                }
+                                onClick={() =>
+                                  void moveQueueItem(
+                                    activeAccountId,
+                                    activeQueue.queue,
+                                    index,
+                                    1,
+                                  )
+                                }
+                                className="rounded-lg border border-border p-2 text-muted disabled:opacity-40"
+                              >
+                                <ArrowDown className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void removeFromQueue(item.id)}
+                                className="rounded-lg border border-border p-2 text-muted hover:text-danger"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-2xl border border-border bg-surface/70">
+                    {previewExport ? (
+                      <ReelPlayer
+                        key={previewExport.id}
+                        size="xl"
+                        src={previewExport.url}
+                        controls
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <div
                         className={cn(
-                          "rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
-                          data.autoPost?.intervalHours === hours
-                            ? "bg-accent text-accent-fg shadow-[0_0_20px_var(--glow)]"
-                            : "border border-border bg-surface-raised text-muted hover:text-foreground",
+                          reelFrameClass("xl"),
+                          "flex items-center justify-center text-sm text-muted",
                         )}
                       >
-                        {hours} hours
-                      </button>
-                    ),
-                  )}
-                </div>
-                <p className="text-[11px] text-muted">
-                  Currently set to{" "}
-                  {data.autoPost.intervalLabel ?? `${data.autoPost.intervalHours ?? 5} hours`}{" "}
-                  between posts per account.
-                </p>
-              </div>
-
-              {data.autoPost.enabled && data.autoPost.next?.exportId && (
-                <div className="mb-4 rounded-2xl border-2 border-accent/50 bg-gradient-to-r from-accent/20 via-accent/10 to-surface/80 px-5 py-4 shadow-[0_0_32px_var(--glow)]">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-fg">
-                        <Share2 className="h-5 w-5" />
+                        Select a finished video
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-accent">
-                          Next Reel
-                        </p>
-                        <p className="mt-1 truncate font-display text-lg font-bold text-foreground">
-                          {data.autoPost.next.exportName || "Finished video"}
-                        </p>
-                      </div>
-                    </div>
-                    {(() => {
-                      const countdown = formatPostCountdown(
-                        data.autoPost.next.postsAt,
-                        data.autoPost.next.eligibleNow,
-                        nowMs,
-                      );
-                      return (
-                        <div className="rounded-xl border border-accent/40 bg-accent/15 px-5 py-3 text-center">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-accent">
-                            {countdown.label}
-                          </p>
-                          <p className="font-display text-3xl font-bold tabular-nums tracking-tight text-accent">
-                            {countdown.value}
-                          </p>
-                        </div>
-                      );
-                    })()}
+                    )}
                   </div>
+
+                  {data.autoPost ? (
+                    <div className="rounded-2xl border border-border bg-surface/70 p-5">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <Timer className="h-4 w-4 text-accent" />
+                          <h3 className="font-display text-lg font-semibold">
+                            Auto-post
+                          </h3>
+                        </div>
+                        <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={data.autoPost.enabled}
+                            disabled={busy}
+                            onChange={(event) =>
+                              void updateAutoPost({ enabled: event.target.checked })
+                            }
+                            className="accent-accent"
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <p className="mb-3 text-sm text-muted">
+                        Each account publishes the next video in its own queue
+                        every{" "}
+                        {data.autoPost.intervalLabel ??
+                          `${data.autoPost.intervalHours ?? 5} hours`}.
+                      </p>
+                      <div className="mb-4 flex flex-wrap gap-2">
+                        {(data.autoPost.intervalOptions ?? [4, 5, 6]).map(
+                          (hours) => (
+                            <button
+                              key={hours}
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                void updateAutoPost({ intervalHours: hours })
+                              }
+                              className={cn(
+                                "rounded-xl px-3 py-2 text-sm font-semibold",
+                                data.autoPost?.intervalHours === hours
+                                  ? "bg-accent text-accent-fg"
+                                  : "border border-border bg-surface-raised text-muted",
+                              )}
+                            >
+                              {hours}h
+                            </button>
+                          ),
+                        )}
+                      </div>
+                      {data.autoPost.next?.exportId ? (
+                        <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm">
+                          <p className="font-medium text-foreground">
+                            Next up: {data.autoPost.next.exportName}
+                          </p>
+                          {data.autoPost.next.accountUsername ? (
+                            <p className="mt-1 text-muted">
+                              @{data.autoPost.next.accountUsername}
+                              <ChevronRight className="mx-1 inline h-3.5 w-3.5" />
+                              {formatPostCountdown(
+                                data.autoPost.next.postsAt,
+                                data.autoPost.next.eligibleNow,
+                                nowMs,
+                              ).value}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
-              )}
+              </section>
 
-              <p className="mb-3 text-xs text-muted">
-                {data.autoPost.unpublishedCount} unpublished finished video
-                {data.autoPost.unpublishedCount === 1 ? "" : "s"} in queue
-              </p>
-
-              <ul className="space-y-2">
-                {data.autoPost.accounts.map((account) => {
-                  const accountCountdown =
-                    data.autoPost?.enabled &&
-                    (account.canPostNow
-                      ? formatPostCountdown(
-                          data.autoPost.next?.postsAt ?? null,
-                          true,
-                          nowMs,
-                        )
-                      : account.nextEligibleAt
-                        ? formatPostCountdown(
-                            account.nextEligibleAt,
-                            false,
-                            nowMs,
-                          )
-                        : null);
-
-                  return (
-                  <li
-                    key={account.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm"
-                  >
-                    <span className="font-medium">@{account.username}</span>
-                    <span
-                      className={cn(
-                        "text-xs tabular-nums",
-                        data.autoPost?.enabled &&
-                          account.canPostNow
-                          ? "font-semibold text-accent"
-                          : "text-muted",
-                      )}
-                    >
-                      {!data.autoPost?.enabled
-                        ? "Auto-post off"
-                        : account.canPostNow
-                          ? accountCountdown
-                            ? `Ready · check in ${accountCountdown.value}`
-                            : "Ready to auto-post"
-                          : account.nextEligibleAt && accountCountdown
-                            ? `Posts ${accountCountdown.value}`
-                            : account.lastPublishedAt
-                              ? `Last posted ${formatWhen(account.lastPublishedAt)}`
-                              : "Waiting for first video"}
-                    </span>
-                  </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : null}
-
-          <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-2xl border border-border bg-surface/70 p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <CalendarClock className="h-4 w-4 text-accent" />
-                <h3 className="font-display text-lg font-semibold">
-                  Schedule a Reel
-                </h3>
-              </div>
-
-              {!data.accounts.length || !data.exports.length ? (
-                <p className="text-sm text-muted">
-                  {!data.accounts.length
-                    ? "Connect an Instagram account first."
-                    : "No unpublished finished videos left. Create new ones in Produce or browse Library → Exports."}
-                </p>
-              ) : (
-                <div className="space-y-4">
+              <section className="rounded-2xl border border-border bg-surface/70 p-5">
+                <div className="mb-4 flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-accent" />
+                  <h3 className="font-display text-lg font-semibold">
+                    Schedule a specific time
+                  </h3>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
                   <label className="block space-y-2">
-                    <span className="text-xs font-medium text-muted">
-                      Account
-                    </span>
+                    <span className="text-xs font-medium text-muted">Account</span>
                     <select
-                      value={accountId}
-                      onChange={(e) => setAccountId(e.target.value)}
-                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm outline-none focus:border-accent/50"
+                      value={scheduleAccountId}
+                      onChange={(event) =>
+                        setScheduleAccountId(event.target.value)
+                      }
+                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm"
                     >
                       {data.accounts.map((account) => (
                         <option key={account.id} value={account.id}>
@@ -670,63 +814,52 @@ export function InstagramScheduler() {
                       ))}
                     </select>
                   </label>
-
                   <label className="block space-y-2">
                     <span className="text-xs font-medium text-muted">
                       Finished video
                     </span>
                     <select
-                      value={exportId}
-                      onChange={(e) => {
-                        setExportId(e.target.value);
+                      value={scheduleExportId}
+                      onChange={(event) => {
+                        setScheduleExportId(event.target.value);
                         setCaption("");
                       }}
-                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm outline-none focus:border-accent/50"
+                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm"
                     >
-                      {data.exports.map((exp) => (
+                      {(data.queues?.[scheduleAccountId]?.available ??
+                        data.exports).map((exp) => (
                         <option key={exp.id} value={exp.id}>
                           {exp.name}
                         </option>
                       ))}
                     </select>
                   </label>
-
-                  <label className="block space-y-2">
-                    <span className="text-xs font-medium text-muted">
-                      Caption
-                    </span>
+                  <label className="block space-y-2 lg:col-span-2">
+                    <span className="text-xs font-medium text-muted">Caption</span>
                     <textarea
                       value={caption}
-                      onChange={(e) => setCaption(e.target.value)}
-                      rows={4}
-                      className="w-full resize-y rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm outline-none focus:border-accent/50"
+                      onChange={(event) => setCaption(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm"
                     />
                   </label>
-
                   <label className="block space-y-2">
-                    <span className="text-xs font-medium text-muted">
-                      Post at
-                    </span>
+                    <span className="text-xs font-medium text-muted">Post at</span>
                     <input
                       type="datetime-local"
                       value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm outline-none focus:border-accent/50"
+                      onChange={(event) => setScheduledAt(event.target.value)}
+                      className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm"
                     />
                   </label>
-
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-end gap-2">
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => void schedule(false)}
                       className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg disabled:opacity-50"
                     >
-                      {busy ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <CalendarClock className="h-4 w-4" />
-                      )}
+                      <CalendarClock className="h-4 w-4" />
                       Schedule
                     </button>
                     <button
@@ -740,93 +873,60 @@ export function InstagramScheduler() {
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+              </section>
 
-            <div className="overflow-hidden rounded-2xl border border-border bg-surface/70">
-              {selectedExport ? (
-                <ReelPlayer
-                  key={selectedExport.id}
-                  size="xl"
-                  src={selectedExport.url}
-                  controls
-                  playsInline
-                  preload="metadata"
-                />
-              ) : (
-                <div
-                  className={cn(
-                    reelFrameClass("xl"),
-                    "flex items-center justify-center text-sm text-muted",
-                  )}
-                >
-                  Select a finished video
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-border bg-surface/70 p-5">
-            <h3 className="mb-4 font-display text-lg font-semibold">
-              Scheduled & published
-            </h3>
-            {!data.scheduledPosts.length ? (
-              <p className="text-sm text-muted">No scheduled posts yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {data.scheduledPosts.map((post) => {
-                  const account = data.accounts.find(
-                    (a) => a.id === post.accountId,
-                  );
-                  const exp = data.exports.find((e) => e.id === post.exportId);
-                  return (
-                    <li
-                      key={post.id}
-                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border bg-surface-raised p-3"
-                    >
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <p className="text-sm font-medium">
-                          {post.exportName || exp?.name || post.exportId}
-                          {post.id.startsWith("auto-") && (
-                            <span className="ml-2 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                              Auto
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs text-muted">
-                          @{account?.username || "account"} ·{" "}
-                          {formatWhen(post.scheduledAt)}
-                        </p>
-                        {post.caption && (
-                          <p className="line-clamp-2 text-xs text-muted">
-                            {post.caption}
-                          </p>
-                        )}
-                        {post.error && (
-                          <p className="text-xs text-danger">{post.error}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <StatusPill status={post.status} />
-                        {post.status === "scheduled" &&
-                          !post.id.startsWith("auto-") && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void cancelPost(post.id)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs text-muted hover:text-danger"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Cancel
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+              <section className="rounded-2xl border border-border bg-surface/70 p-5">
+                <h3 className="mb-4 font-display text-lg font-semibold">
+                  History
+                </h3>
+                {!data.scheduledPosts.length ? (
+                  <p className="text-sm text-muted">No posts yet.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {data.scheduledPosts.map((post) => {
+                      const account = data.accounts.find(
+                        (item) => item.id === post.accountId,
+                      );
+                      return (
+                        <li
+                          key={post.id}
+                          className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border bg-surface-raised p-3"
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <p className="text-sm font-medium">
+                              {post.exportName || post.exportId}
+                            </p>
+                            <p className="text-xs text-muted">
+                              @{account?.username || "account"} ·{" "}
+                              {formatWhen(post.scheduledAt)}
+                            </p>
+                            {post.error ? (
+                              <p className="text-xs text-danger">{post.error}</p>
+                            ) : null}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <StatusPill status={post.status} />
+                            {post.status === "scheduled" &&
+                            post.source !== "auto" &&
+                            !post.id.startsWith("auto-") ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void cancelPost(post.id)}
+                                className="rounded-lg border border-border px-2 py-1 text-xs text-muted hover:text-danger"
+                              >
+                                Cancel
+                              </button>
+                            ) : null}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            </>
+          ) : null}
         </>
       )}
     </div>
@@ -835,6 +935,11 @@ export function InstagramScheduler() {
 
 function StatusPill({ status }: { status: ScheduledPost["status"] }) {
   const map = {
+    queued: {
+      label: "Queued",
+      className: "bg-accent/15 text-accent",
+      icon: ListOrdered,
+    },
     scheduled: {
       label: "Scheduled",
       className: "bg-accent/15 text-accent",

@@ -10,6 +10,11 @@ import {
 } from "@/lib/instagram-autopost";
 import { isInstagramRateLimited } from "@/lib/instagram-errors";
 import {
+  getAccountQueuePosts,
+  getAvailableExportsForAccount,
+  getPublishedExportIdsForAccount,
+} from "@/lib/instagram-queue";
+import {
   getInstagramConfig,
   getPublicMediaBaseUrl,
   isPubliclyReachableMediaUrl,
@@ -31,48 +36,67 @@ export async function GET(request: Request) {
     const instagram = await readInstagram();
     const library = await readLibrary("exports");
 
-  const published = new Set(instagram.publishedExportIds);
-  const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
-  const unpublishedCount = library.exports.filter(
-    (exp) => exp.status === "ready" && !published.has(exp.id),
-  ).length;
-  const queuePreview = getAutoPostQueuePreview(instagram, library.exports);
-  const intervalMs = getAutoPostIntervalMs(instagram);
+    const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
+    const readyExports = library.exports.filter((exp) => exp.status === "ready");
 
-  return NextResponse.json({
-    configured: config.configured,
-    redirectUri: config.redirectUri,
-    canPublishMedia: isPubliclyReachableMediaUrl(`${mediaBase}/x`),
-    mediaBaseUrl: mediaBase || null,
-    accounts: instagram.accounts.map(publicInstagramAccount),
-    scheduledPosts: instagram.scheduledPosts.map((post) => ({
-      ...post,
-      exportName:
-        post.exportName || exportById.get(post.exportId)?.name || post.exportId,
-    })),
-    publishedExportIds: instagram.publishedExportIds,
-    exports: library.exports.filter(
-      (exp) => exp.status === "ready" && !published.has(exp.id),
-    ),
-    autoPost: {
-      enabled: instagram.autoPostEnabled,
-      intervalHours: instagram.autoPostIntervalHours,
-      intervalOptions: [...AUTO_POST_INTERVAL_HOURS_OPTIONS],
-      intervalMs,
-      intervalLabel: formatAutoPostInterval(intervalMs),
-      unpublishedCount,
-      next: queuePreview,
-      accounts: instagram.accounts.map((account) => ({
-        id: account.id,
-        username: account.username,
-        lastPublishedAt: getAccountLastPublishedAt(instagram, account.id),
-        nextEligibleAt: getNextEligibleAt(instagram, account.id),
-        canPostNow: isAccountEligibleForAutoPost(instagram, account.id),
+    const queues = Object.fromEntries(
+      instagram.accounts.map((account) => {
+        const queue = getAccountQueuePosts(instagram, account.id).map((post) => ({
+          ...post,
+          exportName:
+            post.exportName ||
+            exportById.get(post.exportId)?.name ||
+            post.exportId,
+          exportUrl: exportById.get(post.exportId)?.url ?? null,
+        }));
+        const available = getAvailableExportsForAccount(
+          instagram,
+          library.exports,
+          account.id,
+        );
+        const publishedCount = getPublishedExportIdsForAccount(
+          instagram,
+          account.id,
+        ).size;
+        return [account.id, { queue, available, publishedCount }];
+      }),
+    );
+
+    const queuePreview = getAutoPostQueuePreview(instagram, library.exports);
+    const intervalMs = getAutoPostIntervalMs(instagram);
+
+    return NextResponse.json({
+      configured: config.configured,
+      redirectUri: config.redirectUri,
+      canPublishMedia: isPubliclyReachableMediaUrl(`${mediaBase}/x`),
+      mediaBaseUrl: mediaBase || null,
+      accounts: instagram.accounts.map(publicInstagramAccount),
+      scheduledPosts: instagram.scheduledPosts.map((post) => ({
+        ...post,
+        exportName:
+          post.exportName || exportById.get(post.exportId)?.name || post.exportId,
       })),
-      rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
-      rateLimitedNow: isInstagramRateLimited(instagram.apiRateLimitedUntil),
-    },
-  });
+      exports: readyExports,
+      queues,
+      autoPost: {
+        enabled: instagram.autoPostEnabled,
+        intervalHours: instagram.autoPostIntervalHours,
+        intervalOptions: [...AUTO_POST_INTERVAL_HOURS_OPTIONS],
+        intervalMs,
+        intervalLabel: formatAutoPostInterval(intervalMs),
+        next: queuePreview,
+        accounts: instagram.accounts.map((account) => ({
+          id: account.id,
+          username: account.username,
+          lastPublishedAt: getAccountLastPublishedAt(instagram, account.id),
+          nextEligibleAt: getNextEligibleAt(instagram, account.id),
+          canPostNow: isAccountEligibleForAutoPost(instagram, account.id),
+          queueLength: getAccountQueuePosts(instagram, account.id).length,
+        })),
+        rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
+        rateLimitedNow: isInstagramRateLimited(instagram.apiRateLimitedUntil),
+      },
+    });
   } catch (err) {
     console.error("[instagram] GET failed", err);
     return NextResponse.json(

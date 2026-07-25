@@ -9,6 +9,7 @@ import {
   addScheduledPostPg,
   clearApiRateLimitIfExpiredPg,
   markExportPublishedPg,
+  markExportPublishedOnAccountPg,
   readInstagramPg,
   recordAccountPublishedPg,
   removeExportReferencesPg,
@@ -22,6 +23,11 @@ import {
 } from "@/lib/db/stores/instagram";
 import { getAccountLastPublishedAt, normalizeAutoPostIntervalHours } from "./instagram-autopost";
 import { isInstagramRateLimitError } from "./instagram-errors";
+import {
+  getAccountQueuePosts,
+  isExportPublishedOnAccount,
+  nextQueuePosition,
+} from "./instagram-queue";
 import type {
   InstagramAccount,
   InstagramData,
@@ -122,6 +128,8 @@ export function isExportPublished(
   return data.publishedExportIds.includes(exportId);
 }
 
+export { isExportPublishedOnAccount } from "./instagram-queue";
+
 export async function upsertInstagramAccounts(accounts: InstagramAccount[]) {
   if (usesPostgresWrite()) {
     try {
@@ -156,7 +164,8 @@ export async function removeInstagramAccount(id: string) {
     data.accounts = data.accounts.filter((a) => a.id !== id);
     delete data.accountLastPublishedAt[id];
     data.scheduledPosts = data.scheduledPosts.map((post) =>
-      post.accountId === id && post.status === "scheduled"
+      post.accountId === id &&
+      (post.status === "scheduled" || post.status === "queued")
         ? {
             ...post,
             status: "cancelled" as const,
@@ -291,6 +300,62 @@ export async function updateScheduledPost(
   data.scheduledPosts[idx] = { ...data.scheduledPosts[idx], ...patch };
   await syncInstagram(data);
   return data.scheduledPosts[idx];
+}
+
+export async function reorderAccountQueue(
+  accountId: string,
+  orderedIds: string[],
+) {
+  const data = await readInstagram();
+  const queue = getAccountQueuePosts(data, accountId);
+  const queueIds = new Set(queue.map((post) => post.id));
+  if (
+    orderedIds.length !== queue.length ||
+    orderedIds.some((id) => !queueIds.has(id))
+  ) {
+    throw new Error("Invalid queue order.");
+  }
+
+  for (let index = 0; index < orderedIds.length; index += 1) {
+    const id = orderedIds[index];
+    await updateScheduledPost(id, { queuePosition: index });
+  }
+}
+
+export async function markExportPublishedOnAccount(
+  accountId: string,
+  exportId: string,
+) {
+  if (usesPostgresWrite()) {
+    try {
+      return await markExportPublishedOnAccountPg(accountId, exportId);
+    } catch (err) {
+      console.error("[instagram] postgres mark published failed", err);
+      if (!usesJsonWrite()) throw err;
+    }
+  }
+  const data = await readInstagramJson();
+  if (!data.publishedExportIds.includes(exportId)) {
+    data.publishedExportIds.push(exportId);
+  }
+  data.scheduledPosts = data.scheduledPosts.map((post) => {
+    if (
+      post.accountId === accountId &&
+      post.exportId === exportId &&
+      (post.status === "queued" ||
+        post.status === "scheduled" ||
+        post.status === "failed")
+    ) {
+      return {
+        ...post,
+        status: "cancelled" as const,
+        error: "Video already published on this account",
+      };
+    }
+    return post;
+  });
+  await syncInstagram(data);
+  return data;
 }
 
 export async function markExportPublished(exportId: string) {

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   addScheduledPost,
-  isExportPublished,
+  isExportPublishedOnAccount,
   readInstagram,
 } from "@/lib/instagram-store";
+import { getReservedExportIdsForAccount } from "@/lib/instagram-queue";
 import { readLibrary } from "@/lib/library-store";
 import type { ScheduledPost } from "@/lib/types";
 
@@ -46,23 +47,22 @@ export async function POST(request: Request) {
       );
     }
 
-    if (isExportPublished(instagram, exportId)) {
+    if (isExportPublishedOnAccount(instagram, accountId, exportId)) {
       return NextResponse.json(
-        { error: "This video was already published and cannot be posted again." },
+        {
+          error:
+            "This video was already published on this account and cannot be posted again.",
+        },
         { status: 409 },
       );
     }
 
-    const pending = instagram.scheduledPosts.find(
-      (p) =>
-        p.exportId === exportId &&
-        (p.status === "scheduled" || p.status === "publishing"),
-    );
-    if (pending) {
+    const reserved = getReservedExportIdsForAccount(instagram, accountId);
+    if (reserved.has(exportId)) {
       return NextResponse.json(
         {
           error:
-            "This video is already scheduled or publishing. Pick a different finished video.",
+            "This video is already in this account's queue or scheduled. Pick a different finished video.",
         },
         { status: 409 },
       );
@@ -107,6 +107,7 @@ export async function POST(request: Request) {
         exp.name,
       scheduledAt: scheduledAt.toISOString(),
       status: "scheduled",
+      source: "manual",
       createdAt: new Date().toISOString(),
     };
 

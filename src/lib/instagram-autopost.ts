@@ -1,4 +1,10 @@
 import type { InstagramData, LibraryExport } from "./types";
+import {
+  getAccountQueuePosts,
+  getNextQueuePostForAccount,
+  getPublishedExportIdsForAccount,
+  getReservedExportIdsForAccount,
+} from "./instagram-queue";
 
 export const AUTO_POST_INTERVAL_HOURS_OPTIONS = [4, 5, 6] as const;
 export type AutoPostIntervalHours = (typeof AUTO_POST_INTERVAL_HOURS_OPTIONS)[number];
@@ -63,16 +69,43 @@ export function getNextEligibleAt(
   ).toISOString();
 }
 
+/** @deprecated Use getReservedExportIdsForAccount instead */
 export function getReservedExportIds(data: InstagramData): Set<string> {
   const reserved = new Set<string>();
   for (const post of data.scheduledPosts) {
-    if (post.status === "scheduled" || post.status === "publishing") {
+    if (
+      post.status === "queued" ||
+      post.status === "scheduled" ||
+      post.status === "publishing"
+    ) {
       reserved.add(post.exportId);
     }
   }
   return reserved;
 }
 
+export function pickOldestUnpublishedExportForAccount(
+  exports: LibraryExport[],
+  data: InstagramData,
+  accountId: string,
+): LibraryExport | null {
+  const published = getPublishedExportIdsForAccount(data, accountId);
+  const reserved = getReservedExportIdsForAccount(data, accountId);
+  const candidates = exports
+    .filter(
+      (exp) =>
+        exp.status === "ready" &&
+        !published.has(exp.id) &&
+        !reserved.has(exp.id),
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+  return candidates[0] ?? null;
+}
+
+/** @deprecated Use pickOldestUnpublishedExportForAccount */
 export function pickOldestUnpublishedExport(
   exports: LibraryExport[],
   publishedIds: Set<string>,
@@ -103,12 +136,13 @@ export function buildAutoPostCaption(exp: LibraryExport): string {
 export type AutoPostQueuePreview = {
   exportId: string | null;
   exportName: string | null;
-  /** When the next auto-post can run (ISO). Null if ready now or no queue. */
+  accountId: string | null;
+  accountUsername: string | null;
   postsAt: string | null;
   eligibleNow: boolean;
 };
 
-/** Next video in the auto-post queue and when it will publish. */
+/** Next queued video and when it will publish per account. */
 export function getAutoPostQueuePreview(
   instagram: InstagramData,
   exports: LibraryExport[],
@@ -117,6 +151,8 @@ export function getAutoPostQueuePreview(
   const empty: AutoPostQueuePreview = {
     exportId: null,
     exportName: null,
+    accountId: null,
+    accountUsername: null,
     postsAt: null,
     eligibleNow: false,
   };
@@ -125,36 +161,60 @@ export function getAutoPostQueuePreview(
     return empty;
   }
 
-  const published = new Set(instagram.publishedExportIds);
-  const reserved = getReservedExportIds(instagram);
-  const nextExport = pickOldestUnpublishedExport(exports, published, reserved);
-  if (!nextExport) return empty;
-
-  let eligibleNow = false;
+  let preview: AutoPostQueuePreview = empty;
   let earliestMs: number | null = null;
 
   for (const account of instagram.accounts) {
-    if (isAccountEligibleForAutoPost(instagram, account.id, now)) {
-      eligibleNow = true;
-      break;
+    const queued = getNextQueuePostForAccount(instagram, account.id);
+    const fallback = pickOldestUnpublishedExportForAccount(
+      exports,
+      instagram,
+      account.id,
+    );
+    const nextExportId = queued?.exportId ?? fallback?.id ?? null;
+    if (!nextExportId) continue;
+
+    const exportName =
+      queued?.exportName ??
+      fallback?.name ??
+      exports.find((exp) => exp.id === nextExportId)?.name ??
+      null;
+    const eligibleNow = isAccountEligibleForAutoPost(
+      instagram,
+      account.id,
+      now,
+    );
+    const nextAt = eligibleNow
+      ? now
+      : getNextEligibleAt(instagram, account.id)
+        ? new Date(getNextEligibleAt(instagram, account.id)!).getTime()
+        : now;
+
+    if (
+      preview.exportId === null ||
+      (nextAt !== null && earliestMs !== null && nextAt < earliestMs) ||
+      earliestMs === null
+    ) {
+      earliestMs = nextAt;
+      preview = {
+        exportId: nextExportId,
+        exportName,
+        accountId: account.id,
+        accountUsername: account.username,
+        postsAt: eligibleNow
+          ? new Date(now).toISOString()
+          : getNextEligibleAt(instagram, account.id),
+        eligibleNow,
+      };
     }
-    const nextAt = getNextEligibleAt(instagram, account.id);
-    if (!nextAt) {
-      eligibleNow = true;
-      break;
-    }
-    const ms = new Date(nextAt).getTime();
-    if (earliestMs === null || ms < earliestMs) earliestMs = ms;
   }
 
-  return {
-    exportId: nextExport.id,
-    exportName: nextExport.name,
-    postsAt: eligibleNow
-      ? new Date(now).toISOString()
-      : earliestMs !== null
-        ? new Date(earliestMs).toISOString()
-        : null,
-    eligibleNow,
-  };
+  return preview;
+}
+
+export function getAccountQueueLength(
+  data: InstagramData,
+  accountId: string,
+): number {
+  return getAccountQueuePosts(data, accountId).length;
 }

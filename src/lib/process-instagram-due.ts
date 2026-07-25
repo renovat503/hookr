@@ -1,9 +1,8 @@
 import {
   buildAutoPostCaption,
   getAutoPostIntervalMs,
-  getReservedExportIds,
   isAccountEligibleForAutoPost,
-  pickOldestUnpublishedExport,
+  pickOldestUnpublishedExportForAccount,
 } from "@/lib/instagram-autopost";
 import {
   formatInstagramError,
@@ -12,14 +11,18 @@ import {
   isInstagramRateLimited,
 } from "@/lib/instagram-errors";
 import {
+  getNextQueuePostForAccount,
+  inferPostSource,
+} from "@/lib/instagram-queue";
+import {
   publishReelFromLocalFile,
   toPublicVideoUrl,
 } from "@/lib/instagram";
 import { resolveToLocalPath } from "@/lib/storage/media";
 import {
   addScheduledPost,
-  isExportPublished,
-  markExportPublished,
+  isExportPublishedOnAccount,
+  markExportPublishedOnAccount,
   readInstagram,
   recordAccountPublished,
   removeScheduledPost,
@@ -59,16 +62,16 @@ async function publishScheduledPost(
   account: InstagramAccount,
   exp: LibraryExport,
 ): Promise<ProcessResult> {
-  if (isExportPublished(instagram, post.exportId)) {
+  if (isExportPublishedOnAccount(instagram, post.accountId, post.exportId)) {
     await updateScheduledPost(post.id, {
       status: "cancelled",
-      error: "Video already published",
+      error: "Video already published on this account",
     });
     return {
       id: post.id,
       ok: false,
-      error: "Video already published",
-      auto: post.id.startsWith("auto-"),
+      error: "Video already published on this account",
+      auto: inferPostSource(post) === "auto",
     };
   }
 
@@ -96,24 +99,24 @@ async function publishScheduledPost(
       exportName: post.exportName || exp.name,
       error: null,
     });
-    await markExportPublished(post.exportId);
+    await markExportPublishedOnAccount(post.accountId, post.exportId);
     await recordAccountPublished(post.accountId, publishedAt);
 
-    instagram.publishedExportIds = [
-      ...new Set([...instagram.publishedExportIds, post.exportId]),
-    ];
+    if (!instagram.publishedExportIds.includes(post.exportId)) {
+      instagram.publishedExportIds.push(post.exportId);
+    }
 
     return {
       id: post.id,
       ok: true,
       mediaId: published.mediaId,
-      auto: post.id.startsWith("auto-"),
+      auto: inferPostSource(post) === "auto",
     };
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Publish failed.";
     const message = formatInstagramError(raw);
     const rateLimited = isInstagramRateLimitError(raw);
-    const isAuto = post.id.startsWith("auto-");
+    const isAuto = inferPostSource(post) === "auto";
 
     if (rateLimited) {
       await setApiRateLimitedUntil(
@@ -159,45 +162,45 @@ async function runAutoPostPass(
   }
 
   const results: ProcessResult[] = [];
-  const published = new Set(instagram.publishedExportIds);
-  const reserved = getReservedExportIds(instagram);
 
-  // One auto-post attempt per tick to avoid hammering Instagram's API.
   for (const account of instagram.accounts) {
     if (!isAccountEligibleForAutoPost(instagram, account.id)) {
       continue;
     }
 
-    const exp = pickOldestUnpublishedExport(
-      library.exports,
-      published,
-      reserved,
-    );
-    if (!exp) break;
+    const queued = getNextQueuePostForAccount(instagram, account.id);
+    let post = queued;
+    let exp =
+      library.exports.find((item) => item.id === queued?.exportId) ?? null;
 
-    reserved.add(exp.id);
+    if (!post) {
+      const fallback = pickOldestUnpublishedExportForAccount(
+        library.exports,
+        instagram,
+        account.id,
+      );
+      if (!fallback) continue;
 
-    const post: ScheduledPost = {
-      id: `auto-${Date.now()}-${account.id}`,
-      accountId: account.id,
-      exportId: exp.id,
-      exportName: exp.name,
-      caption: buildAutoPostCaption(exp),
-      scheduledAt: new Date().toISOString(),
-      status: "scheduled",
-      createdAt: new Date().toISOString(),
-    };
+      post = {
+        id: `auto-${Date.now()}-${account.id}`,
+        accountId: account.id,
+        exportId: fallback.id,
+        exportName: fallback.name,
+        caption: buildAutoPostCaption(fallback),
+        scheduledAt: new Date().toISOString(),
+        status: "scheduled",
+        source: "auto",
+        createdAt: new Date().toISOString(),
+      };
+      exp = fallback;
+      await addScheduledPost(post);
+      instagram.scheduledPosts.unshift(post);
+    }
 
-    await addScheduledPost(post);
-    instagram.scheduledPosts.unshift(post);
+    if (!exp) continue;
 
     const result = await publishScheduledPost(instagram, post, account, exp);
     results.push(result);
-
-    if (result.ok) {
-      published.add(exp.id);
-    }
-
     break;
   }
 
@@ -236,7 +239,7 @@ export async function processInstagramDue(options?: {
 
     const due = instagram.scheduledPosts.filter((post) => {
       if (options?.id) return post.id === options.id;
-      if (post.id.startsWith("auto-")) return false;
+      if (inferPostSource(post) === "auto") return false;
       if (post.status !== "scheduled") return false;
       return new Date(post.scheduledAt).getTime() <= now;
     });

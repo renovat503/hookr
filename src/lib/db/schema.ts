@@ -163,6 +163,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: "string" })
     .notNull(),
   status: text("status").notNull(),
+  source: text("source").$type<"manual" | "queue" | "auto">().notNull().default("manual"),
+  queuePosition: integer("queue_position"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()
     .defaultNow(),
