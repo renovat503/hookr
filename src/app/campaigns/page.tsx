@@ -6,16 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FolderKanban, Loader2, LogOut, Plus, Trash2 } from "lucide-react";
 import type { Campaign } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
-import { cn } from "@/lib/utils";
-
-function friendlyFetchError(err: unknown, fallback: string): string {
-  if (!(err instanceof Error)) return fallback;
-  const msg = err.message.toLowerCase();
-  if (msg.includes("timed out") || msg.includes("abort")) {
-    return "Database is slow right now. Wait a moment and try again.";
-  }
-  return err.message || fallback;
-}
+import { cn, friendlyFetchError } from "@/lib/utils";
 
 function CampaignsContent() {
   const router = useRouter();
@@ -32,7 +23,7 @@ function CampaignsContent() {
     setError(null);
     try {
       const res = await fetch("/api/campaigns", {
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(35_000),
       });
       const json = (await res.json()) as {
         campaigns?: Campaign[];

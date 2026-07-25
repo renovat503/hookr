@@ -1,8 +1,10 @@
 import { closeDb } from "@/lib/db/client";
 import { withQueryTimeout } from "@/lib/db/query-timeout";
 
-export const DB_QUERY_TIMEOUT_MS = 10_000;
-const MAX_ATTEMPTS = 3;
+export const DB_QUERY_TIMEOUT_MS = 8_000;
+const MAX_ATTEMPTS = 2;
+
+let poolReset: Promise<void> | null = null;
 
 function isTransientDbError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -18,6 +20,19 @@ function isTransientDbError(err: unknown): boolean {
     msg.includes("cannot acquire connection") ||
     msg.includes("connection lost")
   );
+}
+
+async function resetDbPool(): Promise<void> {
+  if (!poolReset) {
+    poolReset = closeDb().finally(() => {
+      poolReset = null;
+    });
+  }
+  await poolReset;
+}
+
+function retryDelayMs(attempt: number): number {
+  return attempt * 250;
 }
 
 export async function dbQuery<T>(
@@ -38,7 +53,8 @@ export async function dbQuery<T>(
           `[db] ${label} failed (attempt ${attempt}/${MAX_ATTEMPTS}), resetting pool`,
           err instanceof Error ? err.message : err,
         );
-        await closeDb().catch(() => undefined);
+        await resetDbPool();
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
         continue;
       }
       throw err;

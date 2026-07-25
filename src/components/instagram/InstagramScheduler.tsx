@@ -37,7 +37,7 @@ import {
   type ScheduleSlot,
 } from "@/lib/posting-slots";
 import type { AccountPostingGoal, LibraryExport, ScheduledPost } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, friendlyFetchError } from "@/lib/utils";
 
 type PublicAccount = {
   id: string;
@@ -90,7 +90,7 @@ export function InstagramScheduler() {
     }
     try {
       const res = await fetch("/api/instagram", {
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(35_000),
       });
       const json = (await res.json()) as InstagramPayload & { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not load Instagram.");
@@ -98,7 +98,7 @@ export function InstagramScheduler() {
       setActiveAccountId((current) => current || json.accounts[0]?.id || "");
     } catch (err) {
       if (!options?.silent) {
-        setError(err instanceof Error ? err.message : "Load failed.");
+        setError(friendlyFetchError(err, "Load failed."));
       }
     } finally {
       if (!options?.silent) setLoading(false);

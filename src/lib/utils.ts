@@ -18,3 +18,16 @@ export function isCompleteHook(hook: LibraryHook): boolean {
   return Boolean(hook.overlayText?.trim());
 }
 
+export function friendlyFetchError(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const msg = err.message.toLowerCase();
+  if (
+    msg.includes("signal timed out") ||
+    msg.includes("timed out") ||
+    msg.includes("abort")
+  ) {
+    return "Request timed out. The database may be busy — wait a moment and retry.";
+  }
+  return err.message || fallback;
+}
+

@@ -11,7 +11,7 @@ import type { ProduceCombo } from "@/lib/produce-combos";
 import { mergeCampaignAssets, resolveBorrowSource } from "@/lib/campaign-assets";
 import { hooksOwnedByCampaign } from "@/lib/campaign-hooks";
 import { isCampaignClosed } from "@/lib/campaign-status";
-import { cn, isCompleteHook } from "@/lib/utils";
+import { cn, friendlyFetchError, isCompleteHook } from "@/lib/utils";
 
 function formatRunFolder(campaignId: string): string {
   const d = new Date();
@@ -53,9 +53,9 @@ export function ProduceRunner() {
     try {
       const [libRes, campRes] = await Promise.all([
         fetch("/api/library?scope=produce", {
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(35_000),
         }),
-        fetch("/api/campaigns", { signal: AbortSignal.timeout(20_000) }),
+        fetch("/api/campaigns", { signal: AbortSignal.timeout(35_000) }),
       ]);
       const lib = (await libRes.json()) as LibraryData & { error?: string };
       const campJson = (await campRes.json()) as {
@@ -74,7 +74,7 @@ export function ProduceRunner() {
         : null;
       setCampaign(active);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load produce page.");
+      setError(friendlyFetchError(err, "Could not load produce page."));
     } finally {
       setLoading(false);
     }

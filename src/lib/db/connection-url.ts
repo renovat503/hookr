@@ -20,7 +20,7 @@ export function resolveDatabaseUrl(): string {
 }
 
 export function isSupabasePoolerUrl(url: string): boolean {
-  return /pooler\.supabase\.com:6543/i.test(url) || /supabase\.co:6543/i.test(url);
+  return /pooler\.supabase\.com/i.test(url);
 }
 
 function extractProjectRef(direct: string): string | null {
@@ -53,7 +53,8 @@ function buildSupabasePoolerUrl(direct: string): string | null {
       "us-east-1";
 
     const user = `postgres.${ref}`;
-    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@aws-0-${region}.pooler.supabase.com:6543/postgres`;
+    // Session pooler (5432) suits long-running Node servers better than transaction mode (6543).
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@aws-0-${region}.pooler.supabase.com:5432/postgres`;
   } catch {
     return null;
   }

@@ -9,7 +9,7 @@ import {
 } from "@/lib/config/storage-mode";
 import { formatPgError, isSupabasePoolerUrl, resolveDatabaseUrl } from "@/lib/db/connection-url";
 import { getDb } from "@/lib/db/client";
-import { withQueryTimeout } from "@/lib/db/query-timeout";
+import { dbQuery } from "@/lib/db/query";
 import { getStorageBucket, getSupabaseAdmin } from "@/lib/storage/supabase";
 
 export const runtime = "nodejs";
@@ -38,10 +38,10 @@ export async function GET() {
     try {
       const url = resolveDatabaseUrl();
       result.database.connection = isSupabasePoolerUrl(url) ? "pooler" : "direct";
-      await withQueryTimeout(
-        getDb().execute(sql`select 1 as ok`),
-        8_000,
+      await dbQuery(
+        () => getDb().execute(sql`select 1 as ok`),
         "database ping",
+        8_000,
       );
       result.database.ok = true;
     } catch (err) {

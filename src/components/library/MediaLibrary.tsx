@@ -17,7 +17,7 @@ import { DownloadButton } from "@/components/ui/DownloadButton";
 import { MediaPlayer, ReelPlayer } from "@/components/ui/ReelPlayer";
 import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
 import { hookCopyLabel } from "@/lib/campaign-hooks";
-import { cn, isCompleteHook, safeUploadFilename } from "@/lib/utils";
+import { cn, friendlyFetchError, isCompleteHook, safeUploadFilename } from "@/lib/utils";
 import { uploadDemoClip, LARGE_DEMO_BYTES } from "@/lib/upload-demo";
 
 type Tab = "hooks" | "demos" | "music" | "motions" | "captions" | "exports";
@@ -127,7 +127,7 @@ export function MediaLibrary({
     setError(null);
     try {
       const campRes = await fetch("/api/campaigns", {
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(35_000),
       });
       let activeId: string | null = null;
       if (campRes.ok) {
@@ -148,12 +148,12 @@ export function MediaLibrary({
         : "/api/library?scope=assets";
 
       const [libRes, expRes, capRes] = await Promise.all([
-        fetch(assetsUrl, { signal: AbortSignal.timeout(30_000) }),
+        fetch(assetsUrl, { signal: AbortSignal.timeout(35_000) }),
         fetch("/api/library?scope=exports", {
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(35_000),
         }),
         fetch("/api/library/captions", {
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(35_000),
         }),
       ]);
       if (!libRes.ok) {
@@ -175,7 +175,7 @@ export function MediaLibrary({
         setCaptionCount(capJson.count ?? capJson.captions?.length ?? 0);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Load failed.");
+      setError(friendlyFetchError(err, "Load failed."));
     } finally {
       setLoading(false);
     }
