@@ -11,6 +11,7 @@
     "db:studio": "drizzle-kit studio",
     "migrate:cloud": "node scripts/migrate-to-cloud.mjs",
     "migrate:cloud:dry-run": "node scripts/migrate-to-cloud.mjs --dry-run",
+    "repair:cloud-media": "node scripts/repair-cloud-media.mjs",
     "check:api": "node scripts/check-api.mjs"
   },
   "dependencies": {

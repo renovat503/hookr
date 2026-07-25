@@ -44,6 +44,7 @@ export function ProduceRunner() {
   const [loading, setLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
   const [planReady, setPlanReady] = useState(false);
+  const [demoMediaOk, setDemoMediaOk] = useState<boolean | null>(null);
   const cancelRef = useRef(false);
   const planRequestRef = useRef(0);
 
@@ -163,6 +164,30 @@ export function ProduceRunner() {
   }, [library, campaign, mergedAssets, maxCount]);
 
   useEffect(() => {
+    if (!library || !mergedAssets?.demoIds.length) {
+      setDemoMediaOk(null);
+      return;
+    }
+    void (async () => {
+      const demos = mergedAssets.demoIds
+        .map((id) => library.demos.find((d) => d.id === id))
+        .filter(Boolean);
+      if (!demos.length) {
+        setDemoMediaOk(false);
+        return;
+      }
+      const checks = await Promise.all(
+        demos.map((demo) =>
+          fetch(demo!.url, { method: "HEAD", signal: AbortSignal.timeout(10_000) })
+            .then((res) => res.ok)
+            .catch(() => false),
+        ),
+      );
+      setDemoMediaOk(checks.every(Boolean));
+    })();
+  }, [library, mergedAssets]);
+
+  useEffect(() => {
     if (!planKey) {
       setPlannedCombos([]);
       setPlanReady(false);
@@ -188,11 +213,12 @@ export function ProduceRunner() {
           demoCount > 0 &&
           exportEstimate > 0 &&
           !planning &&
+          demoMediaOk !== false &&
           (campaign.audioMode !== "random" ||
             (library.music.length ?? 0) > 0) &&
           (campaign.audioMode !== "fixed" || campaign.musicId),
       ),
-    [campaign, library, campaignClosed, planReady, hookCount, demoCount, exportEstimate, planning],
+    [campaign, library, campaignClosed, planReady, hookCount, demoCount, exportEstimate, planning, demoMediaOk],
   );
 
   const pickRandomFormat = () => {
@@ -390,8 +416,18 @@ export function ProduceRunner() {
         </div>
       )}
 
-      {(missingHooks || missingDemos) && !campaignClosed && (
+      {(missingHooks || missingDemos || demoMediaOk === false) && !campaignClosed && (
         <div className="rounded-xl border border-border-subtle bg-surface-raised/40 px-4 py-3 text-sm text-muted">
+          {demoMediaOk === false ? (
+            <p>
+              Demo videos are missing from cloud storage (Produce cannot download
+              them on Railway). Re-upload each demo in{" "}
+              <Link href="/library" className="text-accent hover:underline">
+                Library → Demos
+              </Link>
+              , then try Export again.
+            </p>
+          ) : null}
           {missingHooks ? (
             <p>
               {hooksBorrowed && borrowSource

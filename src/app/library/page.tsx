@@ -10,7 +10,9 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
   const initialTab =
     params.tab === "captions"
       ? ("captions" as const)
-      : params.tab === "hooks" ||
+      : params.tab === "exports"
+        ? ("exports" as const)
+        : params.tab === "hooks" ||
           params.tab === "demos" ||
           params.tab === "motions" ||
           params.tab === "music"

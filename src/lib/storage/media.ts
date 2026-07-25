@@ -14,6 +14,7 @@ import {
 } from "./supabase";
 import {
   usesLocalMediaWrite,
+  usesSupabaseRead,
   usesSupabaseWrite,
 } from "@/lib/config/storage-mode";
 import { hookrTmpDir } from "@/lib/ffmpeg";
@@ -28,6 +29,19 @@ export function localPublicUrl(relativePath: string): string {
 
 export function localPathFromPublicUrl(publicUrl: string): string {
   return path.join(process.cwd(), "public", publicUrl.replace(/^\//, ""));
+}
+
+/** Turn `/uploads/foo.mp4` into a Supabase public URL when cloud storage is enabled. */
+export function resolvePublicMediaUrl(url: string): string {
+  if (!url || isRemoteMediaUrl(url)) return url;
+  if (url.startsWith("/") && usesSupabaseRead()) {
+    try {
+      return toPublicMediaUrl(url.replace(/^\//, ""));
+    } catch {
+      return url;
+    }
+  }
+  return url;
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -146,10 +160,16 @@ export async function resolveToLocalPath(url: string): Promise<string> {
 
   if (url.startsWith("/")) {
     const localPath = localPathFromPublicUrl(url);
-    if (!(await fileExists(localPath))) {
-      throw new Error(`Media file is missing on disk: ${url}`);
+    if (await fileExists(localPath)) {
+      return localPath;
     }
-    return localPath;
+    if (usesSupabaseRead()) {
+      const remote = resolvePublicMediaUrl(url);
+      if (remote !== url && isRemoteMediaUrl(remote)) {
+        return resolveToLocalPath(remote);
+      }
+    }
+    throw new Error(`Media file is missing: ${url}`);
   }
 
   if (isRemoteMediaUrl(url)) {

@@ -40,13 +40,14 @@ export async function POST(request: Request) {
     }
     console.error("[library/exports]", err);
     const raw = err instanceof Error ? err.message : "Export failed.";
-    const friendly = /No such filter|Error reinitializing filters|Conversion failed/i.test(
-      raw,
-    )
-      ? "Could not burn captions onto the video. Try a simpler caption, or re-apply the caption from Step 1, then export again."
-      : raw.length > 280
-        ? `${raw.slice(0, 280)}…`
-        : raw;
+    const friendly =
+      /Media file is missing|Could not download media/i.test(raw)
+        ? "A hook or demo video is missing from cloud storage. Re-upload demos in Library → Demos (and ensure hooks are on Supabase), then try Produce again."
+        : /No such filter|Error reinitializing filters|Conversion failed/i.test(raw)
+          ? "Could not burn captions onto the video. Try a simpler caption, or re-apply the caption from Step 1, then export again."
+          : raw.length > 280
+            ? `${raw.slice(0, 280)}…`
+            : raw;
     return NextResponse.json({ error: friendly }, { status: 500 });
   }
 }

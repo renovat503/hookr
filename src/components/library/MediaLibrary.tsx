@@ -6,6 +6,7 @@ import {
   Loader2,
   MessageSquareText,
   Music2,
+  Share2,
   Sparkles,
   Trash2,
   Upload,
@@ -14,15 +15,16 @@ import {
 import { CaptionLibraryPanel } from "@/components/library/CaptionLibraryPanel";
 import { DownloadButton } from "@/components/ui/DownloadButton";
 import { MediaPlayer, ReelPlayer } from "@/components/ui/ReelPlayer";
-import type { Campaign, LibraryData } from "@/lib/types";
+import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
 import { hookCopyLabel } from "@/lib/campaign-hooks";
 import { cn, isCompleteHook } from "@/lib/utils";
 
-type Tab = "hooks" | "demos" | "music" | "motions" | "captions";
+type Tab = "hooks" | "demos" | "music" | "motions" | "captions" | "exports";
 
 const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   { id: "hooks", label: "Hooks", icon: Sparkles },
   { id: "demos", label: "Demos", icon: Upload },
+  { id: "exports", label: "Exports", icon: Share2 },
   { id: "motions", label: "Motions", icon: Clapperboard },
   { id: "music", label: "Music", icon: Music2 },
   { id: "captions", label: "Captions", icon: MessageSquareText },
@@ -95,6 +97,7 @@ export function MediaLibrary({
 }: MediaLibraryProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [data, setData] = useState<LibraryData | null>(null);
+  const [exports, setExports] = useState<LibraryExport[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,13 +123,18 @@ export function MediaLibrary({
     setLoading(true);
     setError(null);
     try {
-      const [libRes, capRes, campRes] = await Promise.all([
-        fetch("/api/library?scope=assets"),
-        fetch("/api/library/captions"),
-        fetch("/api/campaigns"),
+      const [libRes, expRes, capRes, campRes] = await Promise.all([
+        fetch("/api/library?scope=assets", { signal: AbortSignal.timeout(20_000) }),
+        fetch("/api/library?scope=exports", { signal: AbortSignal.timeout(20_000) }),
+        fetch("/api/library/captions", { signal: AbortSignal.timeout(20_000) }),
+        fetch("/api/campaigns", { signal: AbortSignal.timeout(20_000) }),
       ]);
       if (!libRes.ok) throw new Error("Could not load library.");
       setData((await libRes.json()) as LibraryData);
+      if (expRes.ok) {
+        const expJson = (await expRes.json()) as LibraryData;
+        setExports(expJson.exports ?? []);
+      }
       if (campRes.ok) {
         const campJson = (await campRes.json()) as {
           campaigns?: Campaign[];
@@ -425,6 +433,7 @@ export function MediaLibrary({
   const counts = {
     hooks: campaignHooks.length,
     demos: data?.demos.length ?? 0,
+    exports: exports.length,
     motions: data?.motions?.length ?? 0,
     music: data?.music.length ?? 0,
     captions: captionCount,
@@ -444,8 +453,9 @@ export function MediaLibrary({
           Library
         </h2>
         <p className="mt-2 max-w-xl text-sm text-muted">
-          Hooks, demos, motions, music, and captions saved on this machine.
-          Use Produce to combine hooks and demos into finished videos.
+          Hooks, demos, finished exports, motions, music, and captions. Use
+          Produce to batch-export hook + demo combos, then schedule on
+          Instagram.
         </p>
       </div>
 
@@ -835,6 +845,48 @@ export function MediaLibrary({
         <CaptionLibraryPanel
           onChange={(captions) => setCaptionCount(captions.length)}
         />
+      ) : tab === "exports" ? (
+        <div className="space-y-4">
+          <p className="text-xs text-muted">
+            Finished hook + demo videos from Produce. Schedule them on the{" "}
+            <a href="/instagram" className="text-accent hover:underline">
+              Instagram
+            </a>{" "}
+            page.
+          </p>
+          {exports.length ? (
+            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {exports.map((exp) => (
+                <li
+                  key={exp.id}
+                  className="overflow-hidden rounded-2xl border border-border bg-surface/70"
+                >
+                  <ReelPlayer
+                    size="sm"
+                    src={exp.url}
+                    controls
+                    playsInline
+                    preload="metadata"
+                  />
+                  <div className="space-y-2 p-4">
+                    <p className="line-clamp-2 text-sm font-medium">{exp.name}</p>
+                    <p className="text-[11px] text-muted">
+                      {formatDate(exp.createdAt)}
+                      {exp.runFolder ? ` · ${exp.runFolder}` : ""}
+                    </p>
+                    <DownloadButton url={exp.url} filename={`${exp.id}.mp4`} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState
+              icon={Share2}
+              title="No finished exports yet"
+              hint="Go to Produce to batch-export hook + demo videos for this campaign."
+            />
+          )}
+        </div>
       ) : null}
     </div>
   );

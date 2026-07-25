@@ -120,7 +120,9 @@ export function InstagramScheduler() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/instagram");
+      const res = await fetch("/api/instagram", {
+        signal: AbortSignal.timeout(20_000),
+      });
       const json = (await res.json()) as InstagramPayload & { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not load Instagram.");
       setData(json);
@@ -331,6 +333,18 @@ export function InstagramScheduler() {
           {data?.autoPost?.intervalLabel ?? "5 hours"} per account while this
           app is running.
         </p>
+        {data ? (
+          <p className="mt-2 text-sm text-muted">
+            <span className="font-medium text-foreground">
+              {data.exports.length}
+            </span>{" "}
+            finished video{data.exports.length === 1 ? "" : "s"} ready to
+            schedule
+            {data.exports.length === 0
+              ? " — create more in Produce or view all in Library → Exports."
+              : "."}
+          </p>
+        ) : null}
       </div>
 
       {error && (
@@ -636,7 +650,7 @@ export function InstagramScheduler() {
                 <p className="text-sm text-muted">
                   {!data.accounts.length
                     ? "Connect an Instagram account first."
-                    : "No unpublished finished videos left. Create new ones in Produce."}
+                    : "No unpublished finished videos left. Create new ones in Produce or browse Library → Exports."}
                 </p>
               ) : (
                 <div className="space-y-4">

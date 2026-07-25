@@ -32,6 +32,7 @@ import type {
   LibraryMusic,
 } from "./types";
 import { withTimeout } from "./with-timeout";
+import { resolvePublicMediaUrl } from "./storage/media";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const MANIFEST_PATH = path.join(DATA_DIR, "library.json");
@@ -45,7 +46,7 @@ const EMPTY: LibraryData = {
   motions: [],
 };
 
-function normalizeLibrary(data: Partial<LibraryData>): LibraryData {
+function coerceLibraryData(data: Partial<LibraryData>): LibraryData {
   return {
     hooks: data.hooks ?? [],
     demos: data.demos ?? [],
@@ -59,7 +60,7 @@ function normalizeLibrary(data: Partial<LibraryData>): LibraryData {
 async function readLibraryJson(): Promise<LibraryData> {
   try {
     const raw = await readFile(MANIFEST_PATH, "utf8");
-    return normalizeLibrary(JSON.parse(raw) as Partial<LibraryData>);
+    return coerceLibraryData(JSON.parse(raw) as Partial<LibraryData>);
   } catch {
     return { ...EMPTY };
   }
@@ -115,18 +116,60 @@ async function readLibraryPgScoped(
   return withTimeout(run(), LIBRARY_READ_TIMEOUT_MS, `Library read (${scope})`);
 }
 
+function normalizeLibrary(data: LibraryData): LibraryData {
+  return {
+    ...data,
+    hooks: data.hooks.map((hook) => ({
+      ...hook,
+      url: resolvePublicMediaUrl(hook.url),
+      rawUrl: hook.rawUrl ? resolvePublicMediaUrl(hook.rawUrl) : hook.rawUrl,
+    })),
+    demos: data.demos.map((demo) => ({
+      ...demo,
+      url: resolvePublicMediaUrl(demo.url),
+    })),
+    music: data.music.map((track) => ({
+      ...track,
+      url: resolvePublicMediaUrl(track.url),
+    })),
+    motions: data.motions.map((motion) => ({
+      ...motion,
+      url: resolvePublicMediaUrl(motion.url),
+    })),
+    characters: data.characters.map((character) => ({
+      ...character,
+      url: resolvePublicMediaUrl(character.url),
+    })),
+    exports: data.exports.map((exp) => ({
+      ...exp,
+      url: resolvePublicMediaUrl(exp.url),
+      hookUrl: resolvePublicMediaUrl(exp.hookUrl),
+      demoUrl: resolvePublicMediaUrl(exp.demoUrl),
+    })),
+  };
+}
+
 export async function readLibrary(
   scope: LibraryScope = "full",
 ): Promise<LibraryData> {
+  let data: LibraryData;
   if (usesPostgresRead()) {
     try {
-      return await readLibraryPgScoped(scope);
+      data = await readLibraryPgScoped(scope);
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
+      data = await readLibraryJson();
+      data = scopeLibraryFromJson(data, scope);
     }
+  } else {
+    data = await readLibraryJson();
+    data = scopeLibraryFromJson(data, scope);
   }
-  const data = await readLibraryJson();
+  return normalizeLibrary(data);
+}
+
+function scopeLibraryFromJson(data: LibraryData, scope: LibraryScope): LibraryData {
   switch (scope) {
     case "pickers":
       return { ...emptyLibrary(), hooks: data.hooks, demos: data.demos, music: data.music };
