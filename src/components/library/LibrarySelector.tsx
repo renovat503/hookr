@@ -5,6 +5,7 @@ import { FolderOpen, Upload } from "lucide-react";
 import { MediaPlayer } from "@/components/ui/ReelPlayer";
 import type { DemoClip } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { uploadDemoClip } from "@/lib/upload-demo";
 
 type LibrarySelectorProps = {
   clips: DemoClip[];
@@ -49,11 +50,7 @@ export function LibrarySelector({
       const durationSeconds = await readDuration(blobUrl);
       URL.revokeObjectURL(blobUrl);
 
-      const form = new FormData();
-      form.append("file", file);
-      form.append("durationSeconds", String(durationSeconds));
-
-      const res = await fetch("/api/library/demos", { method: "POST", body: form });
+      const res = await uploadDemoClip(file, durationSeconds);
       const data = (await res.json()) as DemoClip & { error?: string };
       if (!res.ok) throw new Error(data.error || "Upload failed.");
 

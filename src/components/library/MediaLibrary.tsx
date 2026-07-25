@@ -17,7 +17,8 @@ import { DownloadButton } from "@/components/ui/DownloadButton";
 import { MediaPlayer, ReelPlayer } from "@/components/ui/ReelPlayer";
 import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
 import { hookCopyLabel } from "@/lib/campaign-hooks";
-import { cn, isCompleteHook } from "@/lib/utils";
+import { cn, isCompleteHook, safeUploadFilename } from "@/lib/utils";
+import { uploadDemoClip } from "@/lib/upload-demo";
 
 type Tab = "hooks" | "demos" | "music" | "motions" | "captions" | "exports";
 
@@ -189,7 +190,7 @@ export function MediaLibrary({
       URL.revokeObjectURL(blobUrl);
 
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", file, safeUploadFilename(file.name));
       form.append("durationSeconds", String(durationSeconds));
 
       const res = await fetch("/api/library/hooks", {
@@ -222,14 +223,7 @@ export function MediaLibrary({
       const durationSeconds = await readDuration(blobUrl);
       URL.revokeObjectURL(blobUrl);
 
-      const form = new FormData();
-      form.append("file", file);
-      form.append("durationSeconds", String(durationSeconds));
-
-      const res = await fetch("/api/library/demos", {
-        method: "POST",
-        body: form,
-      });
+      const res = await uploadDemoClip(file, durationSeconds);
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error || "Upload failed.");
 
@@ -257,7 +251,7 @@ export function MediaLibrary({
       URL.revokeObjectURL(blobUrl);
 
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", file, safeUploadFilename(file.name));
       form.append("durationSeconds", String(durationSeconds));
 
       const res = await fetch("/api/library/motions", {
@@ -318,7 +312,7 @@ export function MediaLibrary({
       URL.revokeObjectURL(blobUrl);
 
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", file, safeUploadFilename(file.name, "upload.mp3"));
       form.append("durationSeconds", String(durationSeconds));
 
       const res = await fetch("/api/library/music", {
