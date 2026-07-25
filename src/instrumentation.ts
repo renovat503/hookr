@@ -33,7 +33,7 @@ export async function register() {
           ? err.cause.message
           : null;
       console.error(
-        "[hookr/auto-post]",
+        "[hookr/scheduled-posts]",
         cause ? `${message} (${cause})` : message,
       );
     });

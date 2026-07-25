@@ -1,20 +1,10 @@
 import {
-  buildAutoPostCaption,
-  getAutoPostIntervalMs,
-  isAccountEligibleForAutoPost,
-  normalizeAutoPostIntervalHours,
-  pickOldestUnpublishedExportForAccount,
-} from "@/lib/instagram-autopost";
-import {
   formatInstagramError,
   getInstagramRateLimitBackoffMs,
   isInstagramRateLimitError,
   isInstagramRateLimited,
 } from "@/lib/instagram-errors";
-import {
-  getNextQueuePostForAccount,
-  inferPostSource,
-} from "@/lib/instagram-queue";
+import { inferPostSource } from "@/lib/instagram-queue";
 import {
   publishReelFromLocalFile,
   toPublicVideoUrl,
@@ -22,7 +12,6 @@ import {
 import { resolveToLocalPath } from "@/lib/storage/media";
 import { purgePublishedExport } from "@/lib/purge-published-export";
 import {
-  addScheduledPost,
   isExportPublishedOnAccount,
   purgeExportFromInstagram,
   readInstagram,
@@ -44,14 +33,12 @@ export type ProcessResult = {
   ok: boolean;
   mediaId?: string;
   error?: string;
-  auto?: boolean;
   rateLimited?: boolean;
 };
 
 export type ProcessDueResult = {
   processed: number;
   results: ProcessResult[];
-  autoPostIntervalMs: number;
   skipped?: boolean;
   rateLimitedUntil?: string | null;
 };
@@ -73,7 +60,6 @@ async function publishScheduledPost(
       id: post.id,
       ok: false,
       error: "Video already published on this account",
-      auto: inferPostSource(post) === "auto",
     };
   }
 
@@ -107,13 +93,13 @@ async function publishScheduledPost(
       id: post.id,
       ok: true,
       mediaId: published.mediaId,
-      auto: inferPostSource(post) === "auto",
     };
   } catch (err) {
     const raw = err instanceof Error ? err.message : "Publish failed.";
     const message = formatInstagramError(raw);
     const rateLimited = isInstagramRateLimitError(raw);
-    const isAuto = inferPostSource(post) === "auto";
+    const isLegacyAuto =
+      inferPostSource(post) === "auto" || post.id.startsWith("auto-");
 
     if (rateLimited) {
       await setApiRateLimitedUntil(
@@ -121,13 +107,12 @@ async function publishScheduledPost(
       );
     }
 
-    if (isAuto && rateLimited) {
+    if (isLegacyAuto && rateLimited) {
       await removeScheduledPost(post.id);
       return {
         id: post.id,
         ok: false,
         error: message,
-        auto: true,
         rateLimited: true,
       };
     }
@@ -140,92 +125,26 @@ async function publishScheduledPost(
       id: post.id,
       ok: false,
       error: message,
-      auto: isAuto,
       rateLimited,
     };
   }
 }
 
-async function runAutoPostPass(
-  instagram: InstagramData,
-  library: Awaited<ReturnType<typeof readLibrary>>,
-): Promise<ProcessResult[]> {
-  if (!instagram.autoPostEnabled || !instagram.accounts.length) {
-    return [];
-  }
-
-  if (isInstagramRateLimited(instagram.apiRateLimitedUntil)) {
-    return [];
-  }
-
-  const results: ProcessResult[] = [];
-
-  for (const account of instagram.accounts) {
-    if (!isAccountEligibleForAutoPost(instagram, account.id)) {
-      continue;
-    }
-
-    const queued = getNextQueuePostForAccount(instagram, account.id);
-    let post = queued;
-    let exp =
-      library.exports.find((item) => item.id === queued?.exportId) ?? null;
-
-    if (!post) {
-      const fallback = pickOldestUnpublishedExportForAccount(
-        library.exports,
-        instagram,
-        account.id,
-      );
-      if (!fallback) continue;
-
-      post = {
-        id: `auto-${Date.now()}-${account.id}`,
-        accountId: account.id,
-        exportId: fallback.id,
-        exportName: fallback.name,
-        caption: buildAutoPostCaption(fallback),
-        scheduledAt: new Date().toISOString(),
-        status: "scheduled",
-        source: "auto",
-        createdAt: new Date().toISOString(),
-      };
-      exp = fallback;
-      await addScheduledPost(post);
-      instagram.scheduledPosts.unshift(post);
-    }
-
-    if (!exp) continue;
-
-    const result = await publishScheduledPost(instagram, post, account, exp);
-    results.push(result);
-    break;
-  }
-
-  return results;
-}
-
-/** Publish due scheduled posts, then run auto-post for eligible accounts. */
+/** Publish calendar posts whose scheduled time has passed. */
 export async function processInstagramDue(options?: {
   id?: string;
 }): Promise<ProcessDueResult> {
   if (processing) {
-    return {
-      processed: 0,
-      results: [],
-      autoPostIntervalMs:
-        normalizeAutoPostIntervalHours(undefined) * 60 * 60 * 1000,
-      skipped: true,
-    };
+    return { processed: 0, results: [], skipped: true };
   }
 
   processing = true;
   try {
-    let instagram = await readInstagram();
+    const instagram = await readInstagram();
     if (isInstagramRateLimited(instagram.apiRateLimitedUntil)) {
       return {
         processed: 0,
         results: [],
-        autoPostIntervalMs: getAutoPostIntervalMs(instagram),
         skipped: true,
         rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
       };
@@ -274,16 +193,9 @@ export async function processInstagramDue(options?: {
       results.push(result);
     }
 
-    if (!options?.id) {
-      instagram = await readInstagram();
-      const autoResults = await runAutoPostPass(instagram, library);
-      results.push(...autoResults);
-    }
-
     return {
       processed: results.length,
       results,
-      autoPostIntervalMs: getAutoPostIntervalMs(instagram),
       rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
     };
   } finally {

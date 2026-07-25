@@ -273,12 +273,8 @@ export type InstagramData = {
   scheduledPosts: ScheduledPost[];
   /** Export IDs that have been published to Instagram — never selectable again */
   publishedExportIds: string[];
-  /** Per-account ISO timestamp of last successful publish (manual or auto) */
+  /** Per-account ISO timestamp of last successful publish */
   accountLastPublishedAt: Record<string, string>;
-  /** When true, eligible accounts auto-publish oldest videos on a fixed interval */
-  autoPostEnabled: boolean;
-  /** Hours between auto-posts per account (4, 5, or 6) */
-  autoPostIntervalHours: 4 | 5 | 6;
   /** Per-account posting slot configuration */
   accountPostingGoals?: Record<string, AccountPostingGoal>;
   /** Skip Instagram API calls until this time after a rate-limit error (ISO) */

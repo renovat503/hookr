@@ -17,13 +17,12 @@ import {
   removeInstagramAccountPg,
   removeScheduledPostPg,
   setApiRateLimitedUntilPg,
-  setAutoPostSettingsPg,
   setAccountPostingGoalPg,
   updateScheduledPostPg,
   upsertInstagramAccountsPg,
   writeInstagramStatePg,
 } from "@/lib/db/stores/instagram";
-import { getAccountLastPublishedAt, normalizeAutoPostIntervalHours } from "./instagram-autopost";
+import { getAccountLastPublishedAt } from "./instagram-autopost";
 import { isInstagramRateLimitError } from "./instagram-errors";
 import {
   getAccountQueuePosts,
@@ -55,10 +54,6 @@ function normalize(data: Partial<InstagramData>): InstagramData {
         scheduledPosts: data.scheduledPosts ?? [],
         publishedExportIds: [...published],
         accountLastPublishedAt,
-        autoPostEnabled: data.autoPostEnabled ?? true,
-        autoPostIntervalHours: normalizeAutoPostIntervalHours(
-          data.autoPostIntervalHours,
-        ),
       },
       account.id,
     );
@@ -79,10 +74,6 @@ function normalize(data: Partial<InstagramData>): InstagramData {
     ),
     publishedExportIds: [...published],
     accountLastPublishedAt,
-    autoPostEnabled: data.autoPostEnabled ?? true,
-    autoPostIntervalHours: normalizeAutoPostIntervalHours(
-      data.autoPostIntervalHours,
-    ),
     accountPostingGoals: Object.fromEntries(
       Object.entries(data.accountPostingGoals ?? {}).map(([accountId, goal]) => [
         accountId,
@@ -185,39 +176,6 @@ export async function removeInstagramAccount(id: string) {
     );
     await writeInstagramJson(data);
   }
-}
-
-export async function setAutoPostSettings(patch: {
-  enabled?: boolean;
-  intervalHours?: number;
-}) {
-  if (usesPostgresWrite()) {
-    try {
-      return await setAutoPostSettingsPg(patch);
-    } catch (err) {
-      console.error("[instagram] postgres auto-post settings failed", err);
-      if (!usesJsonWrite()) throw err;
-    }
-  }
-
-  const data = await readInstagramJson();
-  if (typeof patch.enabled === "boolean") {
-    data.autoPostEnabled = patch.enabled;
-  }
-  if (patch.intervalHours !== undefined) {
-    data.autoPostIntervalHours = normalizeAutoPostIntervalHours(
-      patch.intervalHours,
-    );
-  }
-  await syncInstagram(data);
-  return {
-    autoPostEnabled: data.autoPostEnabled,
-    autoPostIntervalHours: data.autoPostIntervalHours,
-  };
-}
-
-export async function setAutoPostEnabled(enabled: boolean) {
-  return setAutoPostSettings({ enabled });
 }
 
 export async function setAccountPostingGoal(

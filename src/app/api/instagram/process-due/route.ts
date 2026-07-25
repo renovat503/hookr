@@ -4,7 +4,7 @@ import { processInstagramDue } from "@/lib/process-instagram-due";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-/** Publish due scheduled posts, then run auto-post for eligible accounts. */
+/** Publish due calendar scheduled posts in the background. */
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {

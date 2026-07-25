@@ -1,5 +1,5 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { getAccountLastPublishedAt, normalizeAutoPostIntervalHours } from "@/lib/instagram-autopost";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { getAccountLastPublishedAt } from "@/lib/instagram-autopost";
 import { isInstagramRateLimitError } from "@/lib/instagram-errors";
 import { normalizePostingGoal } from "@/lib/posting-slots";
 import { getDb } from "@/lib/db/client";
@@ -32,10 +32,6 @@ function normalize(data: Partial<InstagramData>): InstagramData {
         scheduledPosts: data.scheduledPosts ?? [],
         publishedExportIds: [...published],
         accountLastPublishedAt,
-        autoPostEnabled: data.autoPostEnabled ?? true,
-        autoPostIntervalHours: normalizeAutoPostIntervalHours(
-          data.autoPostIntervalHours,
-        ),
       },
       account.id,
     );
@@ -56,10 +52,6 @@ function normalize(data: Partial<InstagramData>): InstagramData {
     ),
     publishedExportIds: [...published],
     accountLastPublishedAt,
-    autoPostEnabled: data.autoPostEnabled ?? true,
-    autoPostIntervalHours: normalizeAutoPostIntervalHours(
-      data.autoPostIntervalHours,
-    ),
     accountPostingGoals: Object.fromEntries(
       Object.entries(data.accountPostingGoals ?? {}).map(([accountId, goal]) => [
         accountId,
@@ -192,8 +184,6 @@ async function patchMetaRow(
   patch: Partial<{
     publishedExportIds: string[];
     accountLastPublishedAt: Record<string, string>;
-    autoPostEnabled: boolean;
-    autoPostIntervalHours: number;
     accountPostingGoals: Record<string, AccountPostingGoal>;
     apiRateLimitedUntil: string | null;
   }>,
@@ -205,12 +195,6 @@ async function patchMetaRow(
   }
   if (patch.accountLastPublishedAt !== undefined) {
     set.accountLastPublishedAt = patch.accountLastPublishedAt;
-  }
-  if (patch.autoPostEnabled !== undefined) {
-    set.autoPostEnabled = patch.autoPostEnabled;
-  }
-  if (patch.autoPostIntervalHours !== undefined) {
-    set.autoPostIntervalHours = patch.autoPostIntervalHours;
   }
   if (patch.accountPostingGoals !== undefined) {
     set.accountPostingGoals = patch.accountPostingGoals;
@@ -232,6 +216,23 @@ export async function readInstagramPg(): Promise<InstagramData> {
     db
       .select()
       .from(scheduledPostsTable)
+      .where(
+        and(
+          ne(scheduledPostsTable.source, "auto"),
+          or(
+            inArray(scheduledPostsTable.status, [
+              "scheduled",
+              "queued",
+              "publishing",
+              "failed",
+            ]),
+            and(
+              eq(scheduledPostsTable.status, "published"),
+              sql`${scheduledPostsTable.scheduledAt} >= now() - interval '90 days'`,
+            ),
+          ),
+        ),
+      )
       .orderBy(desc(scheduledPostsTable.createdAt)),
     ensureMetaRow(),
   ]);
@@ -241,10 +242,6 @@ export async function readInstagramPg(): Promise<InstagramData> {
     scheduledPosts: posts.map(rowToScheduledPost),
     publishedExportIds: meta.publishedExportIds ?? [],
     accountLastPublishedAt: meta.accountLastPublishedAt ?? {},
-    autoPostEnabled: meta.autoPostEnabled,
-    autoPostIntervalHours: normalizeAutoPostIntervalHours(
-      meta.autoPostIntervalHours,
-    ),
     accountPostingGoals: meta.accountPostingGoals ?? {},
     apiRateLimitedUntil: meta.apiRateLimitedUntil,
   });
@@ -273,8 +270,6 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
   await patchMetaRow({
     publishedExportIds: normalized.publishedExportIds,
     accountLastPublishedAt: normalized.accountLastPublishedAt,
-    autoPostEnabled: normalized.autoPostEnabled,
-    autoPostIntervalHours: normalized.autoPostIntervalHours,
     accountPostingGoals: normalized.accountPostingGoals ?? {},
     apiRateLimitedUntil: normalized.apiRateLimitedUntil,
   });
@@ -325,25 +320,6 @@ export async function removeInstagramAccountPg(id: string): Promise<void> {
         inArray(scheduledPostsTable.status, ["scheduled", "queued"]),
       ),
     );
-}
-
-export async function setAutoPostSettingsPg(patch: {
-  enabled?: boolean;
-  intervalHours?: number;
-}) {
-  const meta = await ensureMetaRow();
-  const next = {
-    autoPostEnabled:
-      typeof patch.enabled === "boolean"
-        ? patch.enabled
-        : meta.autoPostEnabled,
-    autoPostIntervalHours:
-      patch.intervalHours !== undefined
-        ? normalizeAutoPostIntervalHours(patch.intervalHours)
-        : normalizeAutoPostIntervalHours(meta.autoPostIntervalHours),
-  };
-  await patchMetaRow(next);
-  return next;
 }
 
 export async function setAccountPostingGoalPg(

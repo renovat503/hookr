@@ -1,13 +1,4 @@
 import { NextResponse } from "next/server";
-import {
-  AUTO_POST_INTERVAL_HOURS_OPTIONS,
-  formatAutoPostInterval,
-  getAccountLastPublishedAt,
-  getAutoPostIntervalMs,
-  getAutoPostQueuePreview,
-  getNextEligibleAt,
-  isAccountEligibleForAutoPost,
-} from "@/lib/instagram-autopost";
 import { isInstagramRateLimited } from "@/lib/instagram-errors";
 import {
   getAccountQueuePosts,
@@ -27,7 +18,6 @@ import {
   publicInstagramAccount,
   readInstagram,
   setAccountPostingGoal,
-  setAutoPostSettings,
 } from "@/lib/instagram-store";
 import { readLibrary } from "@/lib/library-store";
 import { formatPgError } from "@/lib/db/connection-url";
@@ -40,7 +30,7 @@ export async function GET(request: Request) {
     const config = getInstagramConfig(request);
     const mediaBase = getPublicMediaBaseUrl();
     const [instagram, library] = await Promise.all([
-      withQueryTimeout(readInstagram(), 12_000, "instagram read"),
+      withQueryTimeout(readInstagram(), 20_000, "instagram read"),
       readLibrary("exports"),
     ]);
 
@@ -70,9 +60,6 @@ export async function GET(request: Request) {
       }),
     );
 
-    const queuePreview = getAutoPostQueuePreview(instagram, library.exports);
-    const intervalMs = getAutoPostIntervalMs(instagram);
-
     return NextResponse.json({
       configured: config.configured,
       redirectUri: config.redirectUri,
@@ -94,24 +81,8 @@ export async function GET(request: Request) {
         ]),
       ),
       postingGoalPresets: POSTING_GOAL_PRESETS,
-      autoPost: {
-        enabled: instagram.autoPostEnabled,
-        intervalHours: instagram.autoPostIntervalHours,
-        intervalOptions: [...AUTO_POST_INTERVAL_HOURS_OPTIONS],
-        intervalMs,
-        intervalLabel: formatAutoPostInterval(intervalMs),
-        next: queuePreview,
-        accounts: instagram.accounts.map((account) => ({
-          id: account.id,
-          username: account.username,
-          lastPublishedAt: getAccountLastPublishedAt(instagram, account.id),
-          nextEligibleAt: getNextEligibleAt(instagram, account.id),
-          canPostNow: isAccountEligibleForAutoPost(instagram, account.id),
-          queueLength: getAccountQueuePosts(instagram, account.id).length,
-        })),
-        rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
-        rateLimitedNow: isInstagramRateLimited(instagram.apiRateLimitedUntil),
-      },
+      rateLimitedUntil: instagram.apiRateLimitedUntil ?? null,
+      rateLimitedNow: isInstagramRateLimited(instagram.apiRateLimitedUntil),
     });
   } catch (err) {
     console.error("[instagram] GET failed", err);
@@ -125,42 +96,26 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as {
-      autoPostEnabled?: boolean;
-      autoPostIntervalHours?: number;
       accountId?: string;
       postingGoal?: { postsPerDay?: number; slotTimes?: string[] };
     };
 
     if (
-      body.accountId &&
-      body.postingGoal &&
-      typeof body.postingGoal.postsPerDay === "number"
-    ) {
-      const goal = await setAccountPostingGoal(body.accountId, {
-        postsPerDay: body.postingGoal.postsPerDay,
-        slotTimes: body.postingGoal.slotTimes ?? [],
-      });
-      return NextResponse.json({ postingGoal: goal });
-    }
-
-    if (
-      typeof body.autoPostEnabled !== "boolean" &&
-      body.autoPostIntervalHours === undefined
+      !body.accountId ||
+      !body.postingGoal ||
+      typeof body.postingGoal.postsPerDay !== "number"
     ) {
       return NextResponse.json(
-        {
-          error:
-            "Provide postingGoal, autoPostEnabled, and/or autoPostIntervalHours.",
-        },
+        { error: "Provide accountId and postingGoal." },
         { status: 400 },
       );
     }
 
-    const updated = await setAutoPostSettings({
-      enabled: body.autoPostEnabled,
-      intervalHours: body.autoPostIntervalHours,
+    const goal = await setAccountPostingGoal(body.accountId, {
+      postsPerDay: body.postingGoal.postsPerDay,
+      slotTimes: body.postingGoal.slotTimes ?? [],
     });
-    return NextResponse.json(updated);
+    return NextResponse.json({ postingGoal: goal });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Could not update settings.";

@@ -58,11 +58,6 @@ type InstagramPayload = {
   scheduledPosts: (ScheduledPost & { exportUrl?: string | null })[];
   queues: Record<string, AccountQueue>;
   postingGoals?: Record<string, AccountPostingGoal>;
-  autoPost?: {
-    enabled: boolean;
-    intervalHours?: 4 | 5 | 6;
-    intervalOptions?: Array<4 | 5 | 6>;
-  };
 };
 
 type ViewMode = "week" | "month" | "queue";
@@ -94,7 +89,7 @@ export function InstagramScheduler() {
     }
     try {
       const res = await fetch("/api/instagram", {
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(25_000),
       });
       const json = (await res.json()) as InstagramPayload & { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not load Instagram.");
@@ -412,35 +407,6 @@ export function InstagramScheduler() {
     }
   };
 
-  const updateAutoPost = async (patch: {
-    enabled?: boolean;
-    intervalHours?: 4 | 5 | 6;
-  }) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/instagram", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(patch.enabled !== undefined
-            ? { autoPostEnabled: patch.enabled }
-            : {}),
-          ...(patch.intervalHours !== undefined
-            ? { autoPostIntervalHours: patch.intervalHours }
-            : {}),
-        }),
-      });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error || "Could not update.");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Update failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-muted">
@@ -480,8 +446,6 @@ export function InstagramScheduler() {
       </div>
     );
   }
-
-  const autoPost = data.autoPost;
 
   return (
     <div className="space-y-4">
@@ -801,45 +765,6 @@ export function InstagramScheduler() {
           </section>
         </div>
       )}
-
-      {autoPost ? (
-        <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-surface/70 px-4 py-3">
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={autoPost.enabled}
-              disabled={busy}
-              onChange={(e) =>
-                void updateAutoPost({ enabled: e.target.checked })
-              }
-              className="accent-accent"
-            />
-            Auto-post
-          </label>
-          <span className="text-sm text-muted">every</span>
-          <div className="flex gap-1">
-            {(autoPost.intervalOptions ?? [4, 5, 6]).map((hours) => (
-              <button
-                key={hours}
-                type="button"
-                disabled={busy || !autoPost.enabled}
-                onClick={() => void updateAutoPost({ intervalHours: hours })}
-                className={cn(
-                  "rounded-lg px-3 py-1 text-sm font-medium disabled:opacity-40",
-                  autoPost.intervalHours === hours
-                    ? "bg-accent text-accent-fg"
-                    : "text-muted hover:text-foreground",
-                )}
-              >
-                {hours}h
-              </button>
-            ))}
-          </div>
-          <span className="text-xs text-muted">
-            Fallback when nothing is scheduled on the calendar.
-          </span>
-        </div>
-      ) : null}
 
       <SchedulePostModal
         open={modalOpen}
