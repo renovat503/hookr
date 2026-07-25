@@ -1,5 +1,6 @@
 import { access, mkdir, unlink, writeFile, copyFile } from "fs/promises";
 import { spawn } from "child_process";
+import os from "os";
 import path from "path";
 import { constants as fsConstants } from "fs";
 import type { OverlayStyle, ExportVariation } from "./types";
@@ -213,6 +214,46 @@ function evenDimension(value: number) {
   return rounded % 2 === 0 ? rounded : rounded - 1;
 }
 
+function workTmpDir() {
+  const base =
+    process.env.NODE_ENV === "production"
+      ? path.join(os.tmpdir(), "hookr")
+      : path.join(process.cwd(), "tmp");
+  return base;
+}
+
+export function hookrTmpDir() {
+  return workTmpDir();
+}
+
+function isLibx264Noise(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  return (
+    trimmed.startsWith("libx264 @") ||
+    trimmed.includes("using cpu capabilities") ||
+    trimmed.includes("profile ") ||
+    trimmed.includes("264 - core") ||
+    trimmed.includes("kb/s:") ||
+    trimmed.startsWith("frame=") ||
+    trimmed.startsWith("Output #") ||
+    trimmed.startsWith("Input #") ||
+    trimmed.startsWith("Stream #") ||
+    trimmed.startsWith("Stream mapping:") ||
+    trimmed.startsWith("Metadata:") ||
+    trimmed.startsWith("major_brand") ||
+    trimmed.startsWith("minor_version") ||
+    trimmed.startsWith("compatible_brands") ||
+    trimmed.startsWith("encoder:") ||
+    trimmed.startsWith("Side data:") ||
+    trimmed.startsWith("cpb:") ||
+    trimmed.startsWith("Press [q]") ||
+    /^mb [IP]/.test(trimmed) ||
+    /^coded y/u.test(trimmed) ||
+    /^i\d+ v,h,dc,p:/.test(trimmed)
+  );
+}
+
 function extractFfmpegError(stderr: string) {
   const lines = stderr.split(/\r?\n/);
   const markers = [
@@ -233,16 +274,20 @@ function extractFfmpegError(stderr: string) {
   ];
   const hits = lines.filter(
     (line) =>
-      markers.some((marker) => line.includes(marker)) ||
-      /\berror\b/i.test(line),
+      !isLibx264Noise(line) &&
+      (markers.some((marker) => line.includes(marker)) ||
+        /\berror\b/i.test(line)),
   );
   if (hits.length > 0) {
     return [...new Set(hits)].join("\n").slice(-1200);
   }
-  const progressIdx = lines.findIndex((line) => line.includes("frame="));
-  const useful = progressIdx > 0 ? lines.slice(0, progressIdx) : lines;
-  const tail = useful.filter((line) => line.trim()).slice(-12).join("\n");
-  return tail.slice(-1200) || stderr.slice(-1200);
+  const useful = lines.filter((line) => !isLibx264Noise(line) && line.trim());
+  if (useful.length > 0) {
+    return useful.slice(-8).join("\n").slice(-1200);
+  }
+  return (
+    "Video encoding failed on the server (often out of memory). Try again or use a shorter clip."
+  );
 }
 
 function ffmpegPreset() {
@@ -287,17 +332,33 @@ export async function getVideoDimensions(
 
 export function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(FFMPEG, ["-y", ...args], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    const child = spawn(
+      FFMPEG,
+      ["-hide_banner", "-loglevel", "warning", "-y", ...args],
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     child.on("error", (err) => reject(err));
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(extractFfmpegError(stderr) || `ffmpeg exited ${code}`));
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      if (signal === "SIGKILL" || signal === "SIGTERM") {
+        reject(
+          new Error(
+            "Video encoding was interrupted on the server (likely out of memory). Try again with a shorter clip.",
+          ),
+        );
+        return;
+      }
+      console.error("[ffmpeg]", extractFfmpegError(stderr), "\n--- stderr ---\n", stderr.slice(-4000));
+      reject(new Error(extractFfmpegError(stderr) || `ffmpeg exited ${code}`));
     });
   });
 }
@@ -312,6 +373,29 @@ async function assertReadableMedia(filePath: string, label: string) {
   }
 }
 
+function assertValidPngBuffer(buffer: Buffer) {
+  const isPng =
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47;
+  if (!isPng) {
+    throw new Error(
+      "Caption image is invalid — refresh the page and try Apply caption again.",
+    );
+  }
+}
+
+export async function assertValidVideoFile(filePath: string, label = "Video") {
+  await assertReadableMedia(filePath, label);
+  try {
+    await getMediaDurationSeconds(filePath);
+  } catch {
+    throw new Error(`${label} file is corrupt or unreadable: ${filePath}`);
+  }
+}
+
 export async function overlayPngOntoVideo(options: {
   inputPath: string;
   outputPath: string;
@@ -321,10 +405,11 @@ export async function overlayPngOntoVideo(options: {
   if (pngBuffer.length < 256) {
     throw new Error("Caption PNG is empty — refresh and try Apply caption again.");
   }
+  assertValidPngBuffer(pngBuffer);
 
-  await assertReadableMedia(options.inputPath, "Input video");
+  await assertValidVideoFile(options.inputPath, "Input video");
 
-  const tmpDir = path.join(/* turbopackIgnore: true */ process.cwd(), "tmp");
+  const tmpDir = workTmpDir();
   await mkdir(tmpDir, { recursive: true });
   await mkdir(path.dirname(options.outputPath), { recursive: true });
 
@@ -338,6 +423,8 @@ export async function overlayPngOntoVideo(options: {
   try {
     const hasAudio = await hasAudioStream(options.inputPath);
     await runFfmpeg([
+      "-threads",
+      "2",
       "-i",
       options.inputPath,
       "-i",
@@ -346,7 +433,7 @@ export async function overlayPngOntoVideo(options: {
       [
         `[0:v]${reelCoverScaleCropFilter(frameW, frameH)},format=yuv420p[base]`,
         `[1:v]format=rgba[ov]`,
-        `[base][ov]overlay=0:0:format=auto[outv]`,
+        `[base][ov]overlay=0:0:eof_action=pass:repeatlast=1,format=yuv420p[outv]`,
       ].join(";"),
       "-map",
       "[outv]",
@@ -357,11 +444,15 @@ export async function overlayPngOntoVideo(options: {
       preset,
       "-crf",
       "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-x264-params",
+      "threads=2:lookahead_threads=1",
       "-movflags",
       "+faststart",
-      "-shortest",
       options.outputPath,
     ]);
+    await assertReadableMedia(options.outputPath, "Output video");
   } finally {
     await safeUnlink(pngPath);
   }

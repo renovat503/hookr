@@ -1,4 +1,6 @@
-import { mkdir, readFile, unlink, writeFile } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile, stat } from "fs/promises";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
 import path from "path";
 import { constants as fsConstants } from "fs";
 import { access } from "fs/promises";
@@ -14,6 +16,7 @@ import {
   usesLocalMediaWrite,
   usesSupabaseWrite,
 } from "@/lib/config/storage-mode";
+import { hookrTmpDir } from "@/lib/ffmpeg";
 
 export function isRemoteMediaUrl(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
@@ -150,25 +153,33 @@ export async function resolveToLocalPath(url: string): Promise<string> {
   }
 
   if (isRemoteMediaUrl(url)) {
-    const tmpDir = path.join(process.cwd(), "tmp", "media-cache");
+    const tmpDir = path.join(hookrTmpDir(), "media-cache");
     await mkdir(tmpDir, { recursive: true });
     const ext = path.extname(new URL(url).pathname) || ".mp4";
     const cacheName = `remote-${Buffer.from(url).toString("base64url").slice(0, 48)}${ext}`;
     const cachedPath = path.join(tmpDir, cacheName);
 
     if (await fileExists(cachedPath)) {
-      return cachedPath;
+      const { size } = await stat(cachedPath);
+      if (size >= 1024) {
+        return cachedPath;
+      }
+      await unlink(cachedPath).catch(() => undefined);
     }
 
     const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) {
       throw new Error(`Could not download media (${res.status}): ${url}`);
     }
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length < 1024) {
-      throw new Error(`Downloaded media is too small (${buffer.length} bytes): ${url}`);
+    if (!res.body) {
+      throw new Error(`Could not download media (empty body): ${url}`);
     }
-    await writeFile(cachedPath, buffer);
+    await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(cachedPath));
+    const { size } = await stat(cachedPath);
+    if (size < 1024) {
+      await unlink(cachedPath).catch(() => undefined);
+      throw new Error(`Downloaded media is too small (${size} bytes): ${url}`);
+    }
     return cachedPath;
   }
 

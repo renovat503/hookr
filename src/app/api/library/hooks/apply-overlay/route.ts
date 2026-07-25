@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { addHook, readLibrary } from "@/lib/library-store";
 import { appendAssetToActiveCampaign } from "@/lib/sync-campaign-assets";
 import { requireActiveCampaignId } from "@/lib/active-campaign";
-import { burnTextOverlay, safeUnlink } from "@/lib/ffmpeg";
+import { burnTextOverlay, hookrTmpDir, safeUnlink } from "@/lib/ffmpeg";
 import { resolveHookRawPath } from "@/lib/hook-raw";
 import { mergeOverlayStyle } from "@/lib/overlay-style";
 import { resolveToLocalPath, saveMediaFromLocalPath } from "@/lib/storage/media";
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     const overlayStyle = mergeOverlayStyle(body.overlayStyle);
     const stamp = Date.now();
     const newHookId = `hook-${stamp}`;
-    const tmpDir = path.join(process.cwd(), "tmp");
+    const tmpDir = hookrTmpDir();
     await mkdir(tmpDir, { recursive: true });
     burnedTempPath = path.join(tmpDir, `${newHookId}.mp4`);
 
