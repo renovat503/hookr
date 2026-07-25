@@ -12,8 +12,11 @@ export async function POST(request: Request) {
       force?: boolean;
     };
 
-    const result = await processInstagramDue({ id: body.id });
-    return NextResponse.json(result);
+    void processInstagramDue({ id: body.id }).catch((err) => {
+      console.error("[instagram/process-due]", err);
+    });
+
+    return NextResponse.json({ accepted: true });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Could not process scheduled posts.";

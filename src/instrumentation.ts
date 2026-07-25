@@ -39,7 +39,7 @@ export async function register() {
     });
   };
 
-  // First run shortly after server boot, then every minute.
+  // First run shortly after server boot, then every two minutes.
   setTimeout(tick, 8_000);
-  setInterval(tick, 60_000);
+  setInterval(tick, 120_000);
 }

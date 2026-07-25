@@ -1,5 +1,4 @@
 import { Sidebar } from "./Sidebar";
-import { AutoPostTicker } from "@/components/instagram/AutoPostTicker";
 
 export function DashboardShell({
   children,
@@ -10,7 +9,6 @@ export function DashboardShell({
 }) {
   return (
     <div className="relative z-10 flex min-h-dvh">
-      <AutoPostTicker />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {header && (

@@ -31,6 +31,7 @@ import {
 } from "@/lib/instagram-store";
 import { readLibrary } from "@/lib/library-store";
 import { formatPgError } from "@/lib/db/connection-url";
+import { withQueryTimeout } from "@/lib/db/query-timeout";
 
 export const runtime = "nodejs";
 
@@ -38,8 +39,10 @@ export async function GET(request: Request) {
   try {
     const config = getInstagramConfig(request);
     const mediaBase = getPublicMediaBaseUrl();
-    const instagram = await readInstagram();
-    const library = await readLibrary("exports");
+    const [instagram, library] = await Promise.all([
+      withQueryTimeout(readInstagram(), 12_000, "instagram read"),
+      readLibrary("exports"),
+    ]);
 
     const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
     const readyExports = library.exports.filter((exp) => exp.status === "ready");

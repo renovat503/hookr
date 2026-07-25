@@ -87,8 +87,11 @@ export function InstagramScheduler() {
   >(null);
   const [rescheduling, setRescheduling] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch("/api/instagram", {
         signal: AbortSignal.timeout(20_000),
@@ -98,9 +101,11 @@ export function InstagramScheduler() {
       setData(json);
       setActiveAccountId((current) => current || json.accounts[0]?.id || "");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Load failed.");
+      if (!options?.silent) {
+        setError(err instanceof Error ? err.message : "Load failed.");
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, []);
 
@@ -119,23 +124,10 @@ export function InstagramScheduler() {
   }, [load]);
 
   useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        await fetch("/api/instagram/process-due", {
-          method: "POST",
-          signal: AbortSignal.timeout(120_000),
-        });
-        if (!cancelled) await load();
-      } catch {
-        // ignore background refresh errors
-      }
-    };
-    const id = window.setInterval(tick, 120_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
+    const id = window.setInterval(() => {
+      void load({ silent: true });
+    }, 120_000);
+    return () => window.clearInterval(id);
   }, [load]);
 
   const activeAccount = useMemo(
@@ -458,7 +450,28 @@ export function InstagramScheduler() {
     );
   }
 
-  if (!data?.configured) {
+  if (!data) {
+    return (
+      <div className="space-y-4 rounded-2xl border border-border bg-surface/70 p-6 text-center">
+        {error ? (
+          <p className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+            {error}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">Could not load Instagram.</p>
+        )}
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-fg"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!data.configured) {
     return (
       <div className="rounded-2xl border border-border bg-surface/70 p-6 text-center">
         <p className="text-sm text-muted">
