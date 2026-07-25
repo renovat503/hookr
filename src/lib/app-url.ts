@@ -44,3 +44,22 @@ function appUrlFromRequest(request: Request): string | null {
 export function instagramRedirectUri(appUrl: string) {
   return `${appUrl.replace(/\/$/, "")}/api/instagram/callback`;
 }
+
+/** OAuth redirect_uri — must match exactly between authorize + token exchange. */
+export function instagramOAuthRedirectUri(request?: Request) {
+  return instagramRedirectUri(resolveAppUrl(request));
+}
+
+export function readRequestCookie(
+  cookieHeader: string,
+  name: string,
+): string | undefined {
+  const prefix = `${name}=`;
+  for (const part of cookieHeader.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) {
+      return decodeURIComponent(trimmed.slice(prefix.length));
+    }
+  }
+  return undefined;
+}

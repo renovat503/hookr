@@ -1,6 +1,6 @@
 import { stat } from "fs/promises";
 import path from "path";
-import { instagramRedirectUri, resolveAppUrl } from "./app-url";
+import { instagramOAuthRedirectUri, resolveAppUrl } from "./app-url";
 
 const IG_GRAPH = "https://graph.instagram.com/v21.0";
 const IG_OAUTH = "https://api.instagram.com/oauth/access_token";
@@ -23,7 +23,7 @@ export function getInstagramConfig(request?: Request) {
     appId,
     appSecret,
     appUrl,
-    redirectUri: instagramRedirectUri(appUrl),
+    redirectUri: instagramOAuthRedirectUri(request),
     configured: Boolean(appId && appSecret),
   };
 }

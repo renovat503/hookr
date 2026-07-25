@@ -31,12 +31,5 @@ export async function GET(request: Request) {
     path: "/",
     maxAge: 60 * 10,
   });
-  response.cookies.set("ig_oauth_redirect", config.redirectUri, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure,
-    path: "/",
-    maxAge: 60 * 10,
-  });
   return response;
 }

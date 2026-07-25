@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readRequestCookie } from "@/lib/app-url";
 import {
   discoverInstagramAccounts,
   exchangeCodeForLongLivedToken,
@@ -32,18 +33,8 @@ export async function GET(request: Request) {
   }
 
   const cookieHeader = request.headers.get("cookie") || "";
-  const cookieParts = cookieHeader
-    .split(";")
-    .map((c) => c.trim());
-  const expected = cookieParts
-    .find((c) => c.startsWith("ig_oauth_state="))
-    ?.split("=")[1];
-  const redirectUri =
-    cookieParts
-      .find((c) => c.startsWith("ig_oauth_redirect="))
-      ?.split("=")
-      .slice(1)
-      .join("=") || config.redirectUri;
+  const expected = readRequestCookie(cookieHeader, "ig_oauth_state");
+  const redirectUri = config.redirectUri;
 
   if (!expected || expected !== state) {
     return NextResponse.redirect(
@@ -83,7 +74,6 @@ export async function GET(request: Request) {
       `${redirectBase}?connected=${accounts.length}`,
     );
     response.cookies.set("ig_oauth_state", "", { path: "/", maxAge: 0 });
-    response.cookies.set("ig_oauth_redirect", "", { path: "/", maxAge: 0 });
     return response;
   } catch (err) {
     const message =
