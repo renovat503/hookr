@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { readAppSettings, updateAppSettings } from "@/lib/app-settings-store";
 import { readLibrary } from "@/lib/library-store";
+import { formatPgError } from "@/lib/db/connection-url";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const settings = await readAppSettings();
-  return NextResponse.json(settings);
+  try {
+    const settings = await readAppSettings();
+    return NextResponse.json(settings);
+  } catch (err) {
+    console.error("[settings] GET failed", err);
+    return NextResponse.json({ error: formatPgError(err) }, { status: 503 });
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -16,7 +22,7 @@ export async function PATCH(request: Request) {
     };
 
     if (body.referenceMotionId !== undefined && body.referenceMotionId !== null) {
-      const library = await readLibrary();
+      const library = await readLibrary("create");
       const motion = library.motions.find((m) => m.id === body.referenceMotionId);
       if (!motion) {
         return NextResponse.json(

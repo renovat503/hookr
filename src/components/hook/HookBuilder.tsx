@@ -322,7 +322,7 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true);
     try {
-      const libRes = await fetch("/api/library");
+      const libRes = await fetch("/api/library?scope=create");
       if (!libRes.ok) return;
       const data = (await libRes.json()) as {
         characters?: LibraryCharacter[];

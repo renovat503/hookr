@@ -51,7 +51,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    void fetch("/api/library")
+    void fetch("/api/library?scope=pickers")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { demos?: DemoClip[] } | null) => {
         if (data?.demos?.length) {

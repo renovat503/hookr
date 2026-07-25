@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       maxCount?: number;
     };
 
-    const library = await readLibrary();
+    const library = await readLibrary("pickers");
     const captions = await readCaptions();
     const allCampaigns = (await readCampaigns()).campaigns;
 

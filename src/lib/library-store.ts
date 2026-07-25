@@ -13,6 +13,9 @@ import {
   addMotionPg,
   addMusicPg,
   readLibraryPg,
+  readLibraryPgForAssets,
+  readLibraryPgForCreate,
+  readLibraryPgForExports,
   readLibraryPgForPickers,
   removeLibraryItemPg,
   updateHookPg,
@@ -65,33 +68,72 @@ async function writeLibraryJson(data: LibraryData) {
   await writeFile(MANIFEST_PATH, JSON.stringify(data, null, 2));
 }
 
-export type LibraryScope = "full" | "pickers";
+export type LibraryScope = "full" | "pickers" | "assets" | "exports" | "create";
+
+function emptyLibrary(): LibraryData {
+  return { hooks: [], demos: [], music: [], exports: [], characters: [], motions: [] };
+}
+
+function scopeFromParam(raw: string | null): LibraryScope {
+  if (
+    raw === "pickers" ||
+    raw === "assets" ||
+    raw === "exports" ||
+    raw === "create"
+  ) {
+    return raw;
+  }
+  return "full";
+}
+
+export { scopeFromParam as parseLibraryScope };
 
 export async function readLibrary(
   scope: LibraryScope = "full",
 ): Promise<LibraryData> {
   if (usesPostgresRead()) {
     try {
-      return scope === "pickers"
-        ? await readLibraryPgForPickers()
-        : await readLibraryPg();
+      switch (scope) {
+        case "pickers":
+          return await readLibraryPgForPickers();
+        case "assets":
+          return await readLibraryPgForAssets();
+        case "exports":
+          return await readLibraryPgForExports();
+        case "create":
+          return await readLibraryPgForCreate();
+        default:
+          return await readLibraryPg();
+      }
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
     }
   }
   const data = await readLibraryJson();
-  if (scope === "pickers") {
-    return {
-      hooks: data.hooks,
-      demos: data.demos,
-      music: data.music,
-      motions: [],
-      characters: [],
-      exports: [],
-    };
+  switch (scope) {
+    case "pickers":
+      return { ...emptyLibrary(), hooks: data.hooks, demos: data.demos, music: data.music };
+    case "assets":
+      return {
+        ...emptyLibrary(),
+        hooks: data.hooks,
+        demos: data.demos,
+        music: data.music,
+        motions: data.motions,
+        characters: data.characters,
+      };
+    case "exports":
+      return { ...emptyLibrary(), exports: data.exports };
+    case "create":
+      return {
+        ...emptyLibrary(),
+        motions: data.motions,
+        characters: data.characters,
+      };
+    default:
+      return data;
   }
-  return data;
 }
 
 export async function writeLibrary(data: LibraryData) {

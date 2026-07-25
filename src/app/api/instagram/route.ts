@@ -20,14 +20,16 @@ import {
   setAutoPostSettings,
 } from "@/lib/instagram-store";
 import { readLibrary } from "@/lib/library-store";
+import { formatPgError } from "@/lib/db/connection-url";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const config = getInstagramConfig();
-  const mediaBase = getPublicMediaBaseUrl();
-  const instagram = await readInstagram();
-  const library = await readLibrary();
+  try {
+    const config = getInstagramConfig();
+    const mediaBase = getPublicMediaBaseUrl();
+    const instagram = await readInstagram();
+    const library = await readLibrary("exports");
 
   const published = new Set(instagram.publishedExportIds);
   const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
@@ -71,6 +73,13 @@ export async function GET() {
       rateLimitedNow: isInstagramRateLimited(instagram.apiRateLimitedUntil),
     },
   });
+  } catch (err) {
+    console.error("[instagram] GET failed", err);
+    return NextResponse.json(
+      { error: formatPgError(err) },
+      { status: 503 },
+    );
+  }
 }
 
 export async function PATCH(request: Request) {

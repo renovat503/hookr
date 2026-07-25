@@ -48,20 +48,33 @@ export function ProduceRunner() {
   const planRequestRef = useRef(0);
 
   const load = useCallback(async () => {
-    const [libRes, sessionRes, campRes] = await Promise.all([
-      fetch("/api/library"),
-      fetch("/api/auth/session"),
-      fetch("/api/campaigns"),
-    ]);
-    const lib = (await libRes.json()) as LibraryData;
-    const session = (await sessionRes.json()) as {
-      activeCampaign?: Campaign | null;
-    };
-    const campJson = (await campRes.json()) as { campaigns: Campaign[] };
-    setLibrary(lib);
-    setCampaigns(campJson.campaigns ?? []);
-    setCampaign(session.activeCampaign ?? null);
-    setLoading(false);
+    setError(null);
+    try {
+      const [libRes, campRes] = await Promise.all([
+        fetch("/api/library?scope=pickers"),
+        fetch("/api/campaigns"),
+      ]);
+      const lib = (await libRes.json()) as LibraryData & { error?: string };
+      const campJson = (await campRes.json()) as {
+        campaigns?: Campaign[];
+        activeId?: string | null;
+        error?: string;
+      };
+      if (!libRes.ok) throw new Error(lib.error || "Could not load library.");
+      if (!campRes.ok) {
+        throw new Error(campJson.error || "Could not load campaigns.");
+      }
+      setLibrary(lib);
+      setCampaigns(campJson.campaigns ?? []);
+      const active = campJson.activeId
+        ? campJson.campaigns?.find((c) => c.id === campJson.activeId) ?? null
+        : null;
+      setCampaign(active);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load produce page.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

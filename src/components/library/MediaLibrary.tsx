@@ -120,23 +120,23 @@ export function MediaLibrary({
     setLoading(true);
     setError(null);
     try {
-      const [libRes, capRes, sessionRes, campRes] = await Promise.all([
-        fetch("/api/library"),
+      const [libRes, capRes, campRes] = await Promise.all([
+        fetch("/api/library?scope=assets"),
         fetch("/api/library/captions"),
-        fetch("/api/auth/session"),
         fetch("/api/campaigns"),
       ]);
       if (!libRes.ok) throw new Error("Could not load library.");
       setData((await libRes.json()) as LibraryData);
-      if (sessionRes.ok) {
-        const session = (await sessionRes.json()) as {
-          activeCampaign?: Campaign | null;
-        };
-        setActiveCampaign(session.activeCampaign ?? null);
-      }
       if (campRes.ok) {
-        const campJson = (await campRes.json()) as { campaigns?: Campaign[] };
+        const campJson = (await campRes.json()) as {
+          campaigns?: Campaign[];
+          activeId?: string | null;
+        };
         setCampaigns(campJson.campaigns ?? []);
+        const active = campJson.activeId
+          ? campJson.campaigns?.find((c) => c.id === campJson.activeId) ?? null
+          : null;
+        setActiveCampaign(active);
       }
       if (capRes.ok) {
         const capJson = (await capRes.json()) as {

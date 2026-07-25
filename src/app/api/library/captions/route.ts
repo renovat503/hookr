@@ -18,8 +18,16 @@ async function ensureSeededCaptions() {
 }
 
 export async function GET() {
-  const captions = await ensureSeededCaptions();
-  return NextResponse.json({ captions, count: captions.length });
+  try {
+    const captions = await ensureSeededCaptions();
+    return NextResponse.json({ captions, count: captions.length });
+  } catch (err) {
+    console.error("[captions] GET failed", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Could not load captions." },
+      { status: 503 },
+    );
+  }
 }
 
 export async function POST(request: Request) {

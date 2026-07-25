@@ -10,7 +10,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "migrate:cloud": "node scripts/migrate-to-cloud.mjs",
-    "migrate:cloud:dry-run": "node scripts/migrate-to-cloud.mjs --dry-run"
+    "migrate:cloud:dry-run": "node scripts/migrate-to-cloud.mjs --dry-run",
+    "check:api": "node scripts/check-api.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.12.0",

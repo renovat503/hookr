@@ -147,6 +147,64 @@ export async function readLibraryPgForPickers(): Promise<LibraryData> {
   };
 }
 
+/** Library tabs — no finished exports payload. */
+export async function readLibraryPgForAssets(): Promise<LibraryData> {
+  const db = getDb();
+  const [hookRows, demoRows, motionRows, musicRows, characterRows] =
+    await Promise.all([
+      db.select().from(hooksTable).orderBy(desc(hooksTable.createdAt)),
+      db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
+      db.select().from(motionsTable).orderBy(desc(motionsTable.uploadedAt)),
+      db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
+      db.select().from(charactersTable).orderBy(desc(charactersTable.uploadedAt)),
+    ]);
+
+  return {
+    hooks: hookRows.map(rowToHook),
+    demos: demoRows.map(rowToDemo),
+    motions: motionRows.map(rowToMotion),
+    music: musicRows.map(rowToMusic),
+    characters: characterRows.map(rowToCharacter),
+    exports: [],
+  };
+}
+
+/** Finished exports only — for Instagram scheduling. */
+export async function readLibraryPgForExports(): Promise<LibraryData> {
+  const db = getDb();
+  const exportRows = await db
+    .select()
+    .from(exportsTable)
+    .orderBy(desc(exportsTable.createdAt));
+
+  return {
+    hooks: [],
+    demos: [],
+    motions: [],
+    music: [],
+    characters: [],
+    exports: exportRows.map(rowToExport),
+  };
+}
+
+/** Motions + characters — for the create hook flow. */
+export async function readLibraryPgForCreate(): Promise<LibraryData> {
+  const db = getDb();
+  const [motionRows, characterRows] = await Promise.all([
+    db.select().from(motionsTable).orderBy(desc(motionsTable.uploadedAt)),
+    db.select().from(charactersTable).orderBy(desc(charactersTable.uploadedAt)),
+  ]);
+
+  return {
+    hooks: [],
+    demos: [],
+    music: [],
+    motions: motionRows.map(rowToMotion),
+    characters: characterRows.map(rowToCharacter),
+    exports: [],
+  };
+}
+
 export async function writeLibraryPg(data: LibraryData): Promise<void> {
   const db = getDb();
   await db.delete(exportsTable);
