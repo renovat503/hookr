@@ -169,6 +169,26 @@ export async function readLibraryPgForAssets(): Promise<LibraryData> {
   };
 }
 
+/** Hooks, demos, music, and export index — for Produce planning and batch export. */
+export async function readLibraryPgForProduce(): Promise<LibraryData> {
+  const db = getDb();
+  const [hookRows, demoRows, musicRows, exportRows] = await Promise.all([
+    db.select().from(hooksTable).orderBy(desc(hooksTable.createdAt)),
+    db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
+    db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
+    db.select().from(exportsTable).orderBy(desc(exportsTable.createdAt)),
+  ]);
+
+  return {
+    hooks: hookRows.map(rowToHook),
+    demos: demoRows.map(rowToDemo),
+    music: musicRows.map(rowToMusic),
+    motions: [],
+    characters: [],
+    exports: exportRows.map(rowToExport),
+  };
+}
+
 /** Finished exports only — for Instagram scheduling. */
 export async function readLibraryPgForExports(): Promise<LibraryData> {
   const db = getDb();

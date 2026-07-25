@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       maxCount?: number;
     };
 
-    const library = await readLibrary("pickers");
+    const library = await readLibrary("produce");
     const captions = await readCaptions();
     const allCampaigns = (await readCampaigns()).campaigns;
 
@@ -60,11 +60,16 @@ export async function POST(request: Request) {
       captionTexts = captions.map((c) => c.text);
     }
 
+    let musicIds: (string | null)[] = [null];
+    if (campaign?.audioMode === "fixed" && campaign.musicId) {
+      musicIds = [campaign.musicId];
+    }
+
     const combos = buildProduceCombos(library, {
       hookIds,
       demoIds,
       captions: captionTexts,
-      musicIds: [null],
+      musicIds,
       shuffle: body.shuffle ?? true,
       maxCount: body.maxCount,
     });

@@ -16,6 +16,7 @@ import {
   readLibraryPgForAssets,
   readLibraryPgForCreate,
   readLibraryPgForExports,
+  readLibraryPgForProduce,
   readLibraryPgForPickers,
   removeLibraryItemPg,
   updateHookPg,
@@ -69,7 +70,7 @@ async function writeLibraryJson(data: LibraryData) {
   await writeFile(MANIFEST_PATH, JSON.stringify(data, null, 2));
 }
 
-export type LibraryScope = "full" | "pickers" | "assets" | "exports" | "create";
+export type LibraryScope = "full" | "pickers" | "assets" | "exports" | "create" | "produce";
 
 function emptyLibrary(): LibraryData {
   return { hooks: [], demos: [], music: [], exports: [], characters: [], motions: [] };
@@ -80,7 +81,8 @@ function scopeFromParam(raw: string | null): LibraryScope {
     raw === "pickers" ||
     raw === "assets" ||
     raw === "exports" ||
-    raw === "create"
+    raw === "create" ||
+    raw === "produce"
   ) {
     return raw;
   }
@@ -104,6 +106,8 @@ async function readLibraryPgScoped(
         return await readLibraryPgForExports();
       case "create":
         return await readLibraryPgForCreate();
+      case "produce":
+        return await readLibraryPgForProduce();
       default:
         return await readLibraryPg();
     }
@@ -142,6 +146,14 @@ export async function readLibrary(
         ...emptyLibrary(),
         motions: data.motions,
         characters: data.characters,
+      };
+    case "produce":
+      return {
+        ...emptyLibrary(),
+        hooks: data.hooks,
+        demos: data.demos,
+        music: data.music,
+        exports: data.exports,
       };
     default:
       return data;

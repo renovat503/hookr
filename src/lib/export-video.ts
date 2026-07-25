@@ -10,6 +10,7 @@ import {
   uniqueifyExportVideo,
 } from "@/lib/ffmpeg";
 import { addExport, readLibrary } from "@/lib/library-store";
+import { hookrTmpDir } from "@/lib/ffmpeg";
 import {
   resolveToLocalPath,
   saveMediaFromLocalPath,
@@ -99,7 +100,7 @@ export async function exportLibraryVideo(
   let mixedTemp: string | null = null;
 
   try {
-    const library = await readLibrary();
+    const library = await readLibrary("produce");
     const hookMeta = body.hookId
       ? library.hooks.find((h) => h.id === body.hookId)
       : undefined;
@@ -172,7 +173,7 @@ export async function exportLibraryVideo(
 
     await mkdir(exportDir, { recursive: true });
     const exportPath = path.join(exportDir, filename);
-    concatTemp = path.join(process.cwd(), "tmp", `${id}-concat.mp4`);
+    concatTemp = path.join(hookrTmpDir(), `${id}-concat.mp4`);
     const variationSeed = Date.now();
     const variation = createExportVariation(variationSeed, Boolean(musicUrl));
     const storedVariation: ExportVariation = {
@@ -209,7 +210,7 @@ export async function exportLibraryVideo(
 
     let stitchHookPath = hookPath;
     if (shouldBurn && burnText) {
-      overlaidTemp = path.join(process.cwd(), "tmp", `${id}-overlay.mp4`);
+      overlaidTemp = path.join(hookrTmpDir(), `${id}-overlay.mp4`);
       let sourcePath = hookPath;
       if (resolvedHookMeta) {
         const resolved = await resolveHookRawPath(resolvedHookMeta);
@@ -243,7 +244,7 @@ export async function exportLibraryVideo(
 
     let preUniquePath = concatTemp;
     if (musicUrl) {
-      mixedTemp = path.join(process.cwd(), "tmp", `${id}-mixed.mp4`);
+      mixedTemp = path.join(hookrTmpDir(), `${id}-mixed.mp4`);
       const musicPath = await resolveToLocalPath(musicUrl);
       await mixBackgroundMusic({
         videoPath: concatTemp,

@@ -14,6 +14,7 @@ const routes = [
   { method: "GET", path: "/api/campaigns", auth: true },
   { method: "GET", path: "/api/library?scope=pickers", auth: true },
   { method: "GET", path: "/api/library?scope=create", auth: true },
+  { method: "GET", path: "/api/library?scope=produce", auth: true },
   { method: "GET", path: "/api/library?scope=assets", auth: true },
   { method: "GET", path: "/api/library?scope=exports", auth: true },
   { method: "GET", path: "/api/library/captions", auth: true },

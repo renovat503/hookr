@@ -51,8 +51,10 @@ export function ProduceRunner() {
     setError(null);
     try {
       const [libRes, campRes] = await Promise.all([
-        fetch("/api/library?scope=pickers"),
-        fetch("/api/campaigns"),
+        fetch("/api/library?scope=produce", {
+          signal: AbortSignal.timeout(20_000),
+        }),
+        fetch("/api/campaigns", { signal: AbortSignal.timeout(20_000) }),
       ]);
       const lib = (await libRes.json()) as LibraryData & { error?: string };
       const campJson = (await campRes.json()) as {
@@ -115,6 +117,7 @@ export function ProduceRunner() {
       const res = await fetch("/api/produce/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({
           campaignId: campaign.id,
           hookIds: mergedAssets.hookIds,
@@ -262,6 +265,7 @@ export function ProduceRunner() {
         const res = await fetch("/api/library/exports", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(300_000),
           body: JSON.stringify({
             ...body,
             runFolder,
@@ -286,7 +290,11 @@ export function ProduceRunner() {
     }
 
     setSummary({ created, failed, skipped });
-    if (firstError && failed > 0) {
+    if (created === 0 && skipped > 0 && failed === 0) {
+      setError(
+        "All planned videos already exist in your library. Delete finished exports or change hooks/demos to create new ones.",
+      );
+    } else if (firstError && failed > 0) {
       setError(
         failed === 1
           ? firstError
@@ -300,6 +308,24 @@ export function ProduceRunner() {
 
   if (loading) {
     return <ProduceSkeleton />;
+  }
+
+  if (error && !campaign && !library) {
+    return (
+      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-8 text-center">
+        <p className="text-sm text-red-200">{error}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            void load();
+          }}
+          className="mt-4 rounded-xl border border-red-400/40 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-500/10"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   if (!campaign) {
@@ -557,6 +583,17 @@ export function ProduceRunner() {
           </div>
         )}
 
+        {planReady && exportEstimate === 0 && hookCount > 0 && demoCount > 0 && (
+          <p className="mt-4 text-sm text-muted">
+            All hook × demo combinations for this campaign are already in your
+            finished exports. Delete existing exports in{" "}
+            <Link href="/instagram" className="text-accent hover:underline">
+              Instagram
+            </Link>{" "}
+            or add new hooks/demos to produce more.
+          </p>
+        )}
+
         {summary && (
           <p className="mt-4 text-sm text-muted">
             Done — {summary.created} created, {summary.failed} failed,{" "}
@@ -564,13 +601,27 @@ export function ProduceRunner() {
           </p>
         )}
 
-        {lastRunFolder && (
+        {lastRunFolder && summary && summary.created > 0 && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-border-subtle bg-background/50 p-3 text-sm">
             <FolderOpen className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
             <div>
-              <p className="font-medium">Saved to disk</p>
-              <p className="mt-0.5 font-mono text-xs text-muted">
-                public/exports/runs/{lastRunFolder}/
+              <p className="font-medium">Saved to library</p>
+              <p className="mt-0.5 text-xs text-muted">
+                {summary.created} video{summary.created === 1 ? "" : "s"} uploaded
+                {lastRunFolder ? (
+                  <>
+                    {" "}
+                    under run{" "}
+                    <span className="font-mono text-foreground">
+                      {lastRunFolder}
+                    </span>
+                  </>
+                ) : null}
+                . View them on the{" "}
+                <Link href="/instagram" className="text-accent hover:underline">
+                  Instagram
+                </Link>{" "}
+                page.
               </p>
             </div>
           </div>
