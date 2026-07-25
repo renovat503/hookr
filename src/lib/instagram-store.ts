@@ -109,6 +109,7 @@ export async function readInstagram(): Promise<InstagramData> {
       return await readInstagramPg();
     } catch (err) {
       console.error("[instagram] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   return readInstagramJson();

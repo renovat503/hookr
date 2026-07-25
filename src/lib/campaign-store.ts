@@ -123,6 +123,7 @@ export async function readCampaigns(): Promise<CampaignsData> {
       return await readCampaignsPg();
     } catch (err) {
       console.error("[campaigns] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   return readCampaignsJson();
@@ -135,6 +136,7 @@ export async function getCampaign(id: string): Promise<Campaign | null> {
       if (campaign) return campaign;
     } catch (err) {
       console.error("[campaigns] postgres get failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   const data = await readCampaignsJson();

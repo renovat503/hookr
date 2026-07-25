@@ -61,6 +61,7 @@ export async function readAppSettings(): Promise<AppSettings> {
       return await readAppSettingsPg();
     } catch (err) {
       console.error("[settings] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   return readAppSettingsJson();

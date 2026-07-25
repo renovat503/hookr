@@ -70,6 +70,7 @@ export async function readLibrary(): Promise<LibraryData> {
       return await readLibraryPg();
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   return readLibraryJson();

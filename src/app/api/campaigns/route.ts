@@ -4,7 +4,8 @@ import {
   CAMPAIGN_COOKIE,
   campaignCookieOptions,
   clearSessionCookieOptions,
-} from "@/lib/auth";
+  isSecureRequest,
+} from "@/lib/auth-session";
 import {
   addCampaign,
   readCampaigns,
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
       borrowAssetKind,
     });
 
-    const secure = new URL(request.url).protocol === "https:";
+    const secure = isSecureRequest(request);
     const res = NextResponse.json(campaign, { status: 201 });
 
     if (body.activate !== false) {
@@ -120,7 +121,7 @@ export async function DELETE(request: Request) {
   }
   const jar = await cookies();
   if (jar.get(CAMPAIGN_COOKIE)?.value === id) {
-    const secure = new URL(request.url).protocol === "https:";
+    const secure = isSecureRequest(request);
     const res = NextResponse.json({ ok: true });
     res.cookies.set(CAMPAIGN_COOKIE, "", { ...clearSessionCookieOptions(secure), maxAge: 0 });
     return res;

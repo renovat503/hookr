@@ -28,8 +28,19 @@ export function usesPostgresWrite(): boolean {
   return mode === "dual-write" || mode === "postgres-only";
 }
 
+function isProductionCloudDeploy(): boolean {
+  return (
+    process.env.NODE_ENV === "production" &&
+    Boolean(process.env.DATABASE_URL?.trim())
+  );
+}
+
+/** Local JSON files are ephemeral on Railway — skip them when Postgres is configured. */
 export function usesJsonWrite(): boolean {
-  return getDataMode() !== "postgres-only";
+  const mode = getDataMode();
+  if (mode === "postgres-only") return false;
+  if (mode === "dual-write" && isProductionCloudDeploy()) return false;
+  return mode === "off" || mode === "dual-write";
 }
 
 export function usesSupabaseRead(): boolean {
@@ -41,8 +52,18 @@ export function usesSupabaseWrite(): boolean {
   return mode === "dual-write" || mode === "supabase-only";
 }
 
+/** Uploaded media on Railway disk is lost on redeploy — prefer Supabase in production. */
 export function usesLocalMediaWrite(): boolean {
-  return getMediaMode() !== "supabase-only";
+  const mode = getMediaMode();
+  if (mode === "supabase-only") return false;
+  if (
+    mode === "dual-write" &&
+    process.env.NODE_ENV === "production" &&
+    isCloudConfigured()
+  ) {
+    return false;
+  }
+  return mode === "local" || mode === "dual-write";
 }
 
 export function isCloudConfigured(): boolean {

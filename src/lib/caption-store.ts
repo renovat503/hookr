@@ -71,6 +71,7 @@ export async function readCaptions(): Promise<LibraryCaption[]> {
       return await readCaptionsPg();
     } catch (err) {
       console.error("[captions] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
     }
   }
   return readCaptionsJson();
