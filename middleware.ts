@@ -9,6 +9,7 @@ import {
 function isPublic(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (pathname === "/api/auth/login") return true;
+  if (pathname === "/api/health") return true;
   if (pathname.startsWith("/api/instagram/callback")) return true;
   if (
     pathname.startsWith("/_next") ||

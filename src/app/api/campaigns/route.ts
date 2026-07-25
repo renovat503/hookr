@@ -6,6 +6,7 @@ import {
   clearSessionCookieOptions,
   isSecureRequest,
 } from "@/lib/auth-session";
+import { formatPgError } from "@/lib/db/connection-url";
 import {
   addCampaign,
   readCampaigns,
@@ -24,8 +25,7 @@ export async function GET() {
     return NextResponse.json({ ...data, activeId });
   } catch (err) {
     console.error("[campaigns] GET failed", err);
-    const message =
-      err instanceof Error ? err.message : "Could not load campaigns.";
+    const message = formatPgError(err);
     return NextResponse.json({ error: message, campaigns: [] }, { status: 503 });
   }
 }

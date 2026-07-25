@@ -13,7 +13,7 @@ export function getDb() {
     if (!loggedConnection) {
       loggedConnection = true;
       console.log(
-        `[db] connecting via ${isSupabasePoolerUrl(url) ? "Supabase pooler (6543)" : "configured DATABASE_URL"}`,
+        `[db] connecting (${isSupabasePoolerUrl(url) ? "supabase pooler" : "direct"})`,
       );
     }
     const needsSsl =

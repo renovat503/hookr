@@ -7,7 +7,7 @@ import {
   usesPostgresRead,
   usesSupabaseRead,
 } from "@/lib/config/storage-mode";
-import { getDb } from "@/lib/db/client";
+import { formatPgError, isSupabasePoolerUrl, resolveDatabaseUrl } from "@/lib/db/connection-url";
 import { getStorageBucket, getSupabaseAdmin } from "@/lib/storage/supabase";
 
 export const runtime = "nodejs";
@@ -21,6 +21,7 @@ export async function GET() {
     database: {
       enabled: usesPostgresRead(),
       ok: false as boolean,
+      connection: null as string | null,
       error: null as string | null,
     },
     supabase: {
@@ -33,12 +34,13 @@ export async function GET() {
 
   if (usesPostgresRead()) {
     try {
+      const url = resolveDatabaseUrl();
+      result.database.connection = isSupabasePoolerUrl(url) ? "pooler" : "direct";
       await getDb().execute(sql`select 1 as ok`);
       result.database.ok = true;
     } catch (err) {
       result.ok = false;
-      result.database.error =
-        err instanceof Error ? err.message : "Database connection failed.";
+      result.database.error = formatPgError(err);
     }
   } else {
     result.database.error = "Postgres reads disabled (HOOKR_DATA_MODE=off).";
