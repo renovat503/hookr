@@ -22,7 +22,9 @@ function CampaignsContent() {
   const load = async () => {
     setError(null);
     try {
-      const res = await fetch("/api/campaigns");
+      const res = await fetch("/api/campaigns", {
+        signal: AbortSignal.timeout(20_000),
+      });
       const json = (await res.json()) as {
         campaigns?: Campaign[];
         activeId?: string | null;

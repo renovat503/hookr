@@ -122,13 +122,15 @@ export function InstagramScheduler() {
     let cancelled = false;
     const tick = async () => {
       try {
-        await fetch("/api/instagram/process-due", { method: "POST" });
+        await fetch("/api/instagram/process-due", {
+          method: "POST",
+          signal: AbortSignal.timeout(120_000),
+        });
         if (!cancelled) await load();
       } catch {
-        // ignore
+        // ignore background refresh errors
       }
     };
-    void tick();
     const id = window.setInterval(tick, 120_000);
     return () => {
       cancelled = true;

@@ -2,6 +2,7 @@ import {
   buildAutoPostCaption,
   getAutoPostIntervalMs,
   isAccountEligibleForAutoPost,
+  normalizeAutoPostIntervalHours,
   pickOldestUnpublishedExportForAccount,
 } from "@/lib/instagram-autopost";
 import {
@@ -208,11 +209,11 @@ export async function processInstagramDue(options?: {
   id?: string;
 }): Promise<ProcessDueResult> {
   if (processing) {
-    const instagram = await readInstagram();
     return {
       processed: 0,
       results: [],
-      autoPostIntervalMs: getAutoPostIntervalMs(instagram),
+      autoPostIntervalMs:
+        normalizeAutoPostIntervalHours(undefined) * 60 * 60 * 1000,
       skipped: true,
     };
   }

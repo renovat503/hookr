@@ -8,6 +8,8 @@ export async function ensureInstagramMeta(): Promise<void> {
   if (!process.env.DATABASE_URL?.trim()) return;
 
   try {
+    await getDb().execute(sql`set lock_timeout = '5s'`);
+    await getDb().execute(sql`set statement_timeout = '30s'`);
     await getDb().execute(sql`
       create table if not exists instagram_meta (
         id text primary key default 'default',

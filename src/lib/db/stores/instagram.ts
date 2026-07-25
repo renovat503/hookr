@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getAccountLastPublishedAt, normalizeAutoPostIntervalHours } from "@/lib/instagram-autopost";
 import { isInstagramRateLimitError } from "@/lib/instagram-errors";
 import { normalizePostingGoal } from "@/lib/posting-slots";
@@ -106,6 +106,61 @@ function rowToScheduledPost(
   };
 }
 
+function accountValues(account: InstagramAccount) {
+  return {
+    id: account.id,
+    igUserId: account.igUserId,
+    username: account.username,
+    profilePictureUrl: account.profilePictureUrl,
+    pageId: account.pageId,
+    pageName: account.pageName,
+    accessToken: account.accessToken,
+    connectedAt: account.connectedAt,
+    tokenExpiresAt: account.tokenExpiresAt,
+  };
+}
+
+function scheduledPostValues(post: ScheduledPost) {
+  return {
+    id: post.id,
+    accountId: post.accountId,
+    exportId: post.exportId,
+    exportName: post.exportName,
+    caption: post.caption,
+    scheduledAt: post.scheduledAt,
+    status: post.status,
+    source: post.source ?? "manual",
+    queuePosition: post.queuePosition ?? null,
+    createdAt: post.createdAt,
+    publishedAt: post.publishedAt,
+    publishedMediaId: post.publishedMediaId,
+    error: post.error,
+  };
+}
+
+function scheduledPostPatch(
+  patch: Partial<ScheduledPost>,
+): Partial<typeof scheduledPostsTable.$inferInsert> {
+  const set: Partial<typeof scheduledPostsTable.$inferInsert> = {};
+  if (patch.accountId !== undefined) set.accountId = patch.accountId;
+  if (patch.exportId !== undefined) set.exportId = patch.exportId;
+  if (patch.exportName !== undefined) set.exportName = patch.exportName;
+  if (patch.caption !== undefined) set.caption = patch.caption;
+  if (patch.scheduledAt !== undefined) set.scheduledAt = patch.scheduledAt;
+  if (patch.status !== undefined) set.status = patch.status;
+  if (patch.source !== undefined) set.source = patch.source;
+  if (patch.queuePosition !== undefined) {
+    set.queuePosition = patch.queuePosition ?? null;
+  }
+  if (patch.createdAt !== undefined) set.createdAt = patch.createdAt;
+  if (patch.publishedAt !== undefined) set.publishedAt = patch.publishedAt;
+  if (patch.publishedMediaId !== undefined) {
+    set.publishedMediaId = patch.publishedMediaId;
+  }
+  if (patch.error !== undefined) set.error = patch.error;
+  return set;
+}
+
 async function readMetaRow() {
   try {
     const rows = await getDb()
@@ -133,6 +188,43 @@ async function ensureMetaRow() {
   return (await readMetaRow())!;
 }
 
+async function patchMetaRow(
+  patch: Partial<{
+    publishedExportIds: string[];
+    accountLastPublishedAt: Record<string, string>;
+    autoPostEnabled: boolean;
+    autoPostIntervalHours: number;
+    accountPostingGoals: Record<string, AccountPostingGoal>;
+    apiRateLimitedUntil: string | null;
+  }>,
+) {
+  await ensureMetaRow();
+  const set: Partial<typeof instagramMetaTable.$inferInsert> = {};
+  if (patch.publishedExportIds !== undefined) {
+    set.publishedExportIds = patch.publishedExportIds;
+  }
+  if (patch.accountLastPublishedAt !== undefined) {
+    set.accountLastPublishedAt = patch.accountLastPublishedAt;
+  }
+  if (patch.autoPostEnabled !== undefined) {
+    set.autoPostEnabled = patch.autoPostEnabled;
+  }
+  if (patch.autoPostIntervalHours !== undefined) {
+    set.autoPostIntervalHours = patch.autoPostIntervalHours;
+  }
+  if (patch.accountPostingGoals !== undefined) {
+    set.accountPostingGoals = patch.accountPostingGoals;
+  }
+  if (patch.apiRateLimitedUntil !== undefined) {
+    set.apiRateLimitedUntil = patch.apiRateLimitedUntil;
+  }
+  if (Object.keys(set).length === 0) return;
+  await getDb()
+    .update(instagramMetaTable)
+    .set(set)
+    .where(eq(instagramMetaTable.id, META_ID));
+}
+
 export async function readInstagramPg(): Promise<InstagramData> {
   const db = getDb();
   const [accounts, posts, meta] = await Promise.all([
@@ -158,6 +250,7 @@ export async function readInstagramPg(): Promise<InstagramData> {
   });
 }
 
+/** Full replace — only for migration / json sync tooling. */
 async function writeInstagramPg(data: InstagramData): Promise<void> {
   const normalized = normalize(data);
   const db = getDb();
@@ -166,163 +259,141 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
   await db.delete(instagramAccountsTable);
 
   if (normalized.accounts.length) {
-    await db.insert(instagramAccountsTable).values(
-      normalized.accounts.map((account) => ({
-        id: account.id,
-        igUserId: account.igUserId,
-        username: account.username,
-        profilePictureUrl: account.profilePictureUrl,
-        pageId: account.pageId,
-        pageName: account.pageName,
-        accessToken: account.accessToken,
-        connectedAt: account.connectedAt,
-        tokenExpiresAt: account.tokenExpiresAt,
-      })),
-    );
+    await db
+      .insert(instagramAccountsTable)
+      .values(normalized.accounts.map(accountValues));
   }
 
   if (normalized.scheduledPosts.length) {
-    await db.insert(scheduledPostsTable).values(
-      normalized.scheduledPosts.map((post) => ({
-        id: post.id,
-        accountId: post.accountId,
-        exportId: post.exportId,
-        exportName: post.exportName,
-        caption: post.caption,
-        scheduledAt: post.scheduledAt,
-        status: post.status,
-        source: post.source ?? "manual",
-        queuePosition: post.queuePosition ?? null,
-        createdAt: post.createdAt,
-        publishedAt: post.publishedAt,
-        publishedMediaId: post.publishedMediaId,
-        error: post.error,
-      })),
-    );
+    await db
+      .insert(scheduledPostsTable)
+      .values(normalized.scheduledPosts.map(scheduledPostValues));
   }
 
-  await db
-    .insert(instagramMetaTable)
-    .values({
-      id: META_ID,
-      publishedExportIds: normalized.publishedExportIds,
-      accountLastPublishedAt: normalized.accountLastPublishedAt,
-      autoPostEnabled: normalized.autoPostEnabled,
-      autoPostIntervalHours: normalized.autoPostIntervalHours,
-      accountPostingGoals: normalized.accountPostingGoals ?? {},
-      apiRateLimitedUntil: normalized.apiRateLimitedUntil,
-    })
-    .onConflictDoUpdate({
-      target: instagramMetaTable.id,
-      set: {
-        publishedExportIds: normalized.publishedExportIds,
-        accountLastPublishedAt: normalized.accountLastPublishedAt,
-        autoPostEnabled: normalized.autoPostEnabled,
-        autoPostIntervalHours: normalized.autoPostIntervalHours,
-        accountPostingGoals: normalized.accountPostingGoals ?? {},
-        apiRateLimitedUntil: normalized.apiRateLimitedUntil,
-      },
-    });
+  await patchMetaRow({
+    publishedExportIds: normalized.publishedExportIds,
+    accountLastPublishedAt: normalized.accountLastPublishedAt,
+    autoPostEnabled: normalized.autoPostEnabled,
+    autoPostIntervalHours: normalized.autoPostIntervalHours,
+    accountPostingGoals: normalized.accountPostingGoals ?? {},
+    apiRateLimitedUntil: normalized.apiRateLimitedUntil,
+  });
 }
 
 export async function upsertInstagramAccountsPg(
   accounts: InstagramAccount[],
 ): Promise<InstagramAccount[]> {
-  const data = await readInstagramPg();
+  const db = getDb();
   for (const account of accounts) {
-    const idx = data.accounts.findIndex((a) => a.igUserId === account.igUserId);
-    if (idx >= 0) data.accounts[idx] = account;
-    else data.accounts.unshift(account);
+    const existing = await db
+      .select({ id: instagramAccountsTable.id })
+      .from(instagramAccountsTable)
+      .where(eq(instagramAccountsTable.igUserId, account.igUserId))
+      .limit(1);
+
+    if (existing[0]) {
+      await db
+        .update(instagramAccountsTable)
+        .set(accountValues({ ...account, id: existing[0].id }))
+        .where(eq(instagramAccountsTable.id, existing[0].id));
+    } else {
+      await db.insert(instagramAccountsTable).values(accountValues(account));
+    }
   }
-  await writeInstagramPg(data);
-  return data.accounts;
+
+  const rows = await db.select().from(instagramAccountsTable);
+  return rows.map(rowToAccount);
 }
 
 export async function removeInstagramAccountPg(id: string): Promise<void> {
-  const data = await readInstagramPg();
-  data.accounts = data.accounts.filter((a) => a.id !== id);
-  delete data.accountLastPublishedAt[id];
-  data.scheduledPosts = data.scheduledPosts.map((post) =>
-    post.accountId === id &&
-    (post.status === "scheduled" || post.status === "queued")
-      ? {
-          ...post,
-          status: "cancelled" as const,
-          error: "Account disconnected",
-        }
-      : post,
-  );
-  await writeInstagramPg(data);
+  const db = getDb();
+  await db
+    .delete(instagramAccountsTable)
+    .where(eq(instagramAccountsTable.id, id));
+
+  const meta = await ensureMetaRow();
+  const accountLastPublishedAt = { ...(meta.accountLastPublishedAt ?? {}) };
+  delete accountLastPublishedAt[id];
+  await patchMetaRow({ accountLastPublishedAt });
+
+  await db
+    .update(scheduledPostsTable)
+    .set({ status: "cancelled", error: "Account disconnected" })
+    .where(
+      and(
+        eq(scheduledPostsTable.accountId, id),
+        inArray(scheduledPostsTable.status, ["scheduled", "queued"]),
+      ),
+    );
 }
 
 export async function setAutoPostSettingsPg(patch: {
   enabled?: boolean;
   intervalHours?: number;
 }) {
-  const data = await readInstagramPg();
-  if (typeof patch.enabled === "boolean") {
-    data.autoPostEnabled = patch.enabled;
-  }
-  if (patch.intervalHours !== undefined) {
-    data.autoPostIntervalHours = normalizeAutoPostIntervalHours(
-      patch.intervalHours,
-    );
-  }
-  await writeInstagramPg(data);
-  return {
-    autoPostEnabled: data.autoPostEnabled,
-    autoPostIntervalHours: data.autoPostIntervalHours,
+  const meta = await ensureMetaRow();
+  const next = {
+    autoPostEnabled:
+      typeof patch.enabled === "boolean"
+        ? patch.enabled
+        : meta.autoPostEnabled,
+    autoPostIntervalHours:
+      patch.intervalHours !== undefined
+        ? normalizeAutoPostIntervalHours(patch.intervalHours)
+        : normalizeAutoPostIntervalHours(meta.autoPostIntervalHours),
   };
+  await patchMetaRow(next);
+  return next;
 }
 
 export async function setAccountPostingGoalPg(
   accountId: string,
   goal: AccountPostingGoal,
 ) {
-  const data = await readInstagramPg();
-  data.accountPostingGoals = {
-    ...(data.accountPostingGoals ?? {}),
+  const meta = await ensureMetaRow();
+  const accountPostingGoals = {
+    ...(meta.accountPostingGoals ?? {}),
     [accountId]: normalizePostingGoal(goal),
   };
-  await writeInstagramPg(data);
-  return data.accountPostingGoals[accountId];
+  await patchMetaRow({ accountPostingGoals });
+  return accountPostingGoals[accountId]!;
 }
 
 export async function setApiRateLimitedUntilPg(until: string | null) {
-  const data = await readInstagramPg();
-  data.apiRateLimitedUntil = until;
-  await writeInstagramPg(data);
+  await patchMetaRow({ apiRateLimitedUntil: until });
   return until;
 }
 
 export async function clearApiRateLimitIfExpiredPg(now = Date.now()) {
-  const data = await readInstagramPg();
+  const meta = await ensureMetaRow();
   if (
-    data.apiRateLimitedUntil &&
-    new Date(data.apiRateLimitedUntil).getTime() <= now
+    meta.apiRateLimitedUntil &&
+    new Date(meta.apiRateLimitedUntil).getTime() <= now
   ) {
-    data.apiRateLimitedUntil = null;
-    await writeInstagramPg(data);
+    await patchMetaRow({ apiRateLimitedUntil: null });
+    return { ...meta, apiRateLimitedUntil: null };
   }
-  return data;
+  return meta;
 }
 
 export async function recordAccountPublishedPg(
   accountId: string,
   publishedAt: string,
 ) {
-  const data = await readInstagramPg();
-  const prev = data.accountLastPublishedAt[accountId];
+  const meta = await ensureMetaRow();
+  const prev = meta.accountLastPublishedAt?.[accountId];
   if (!prev || publishedAt > prev) {
-    data.accountLastPublishedAt[accountId] = publishedAt;
-    await writeInstagramPg(data);
+    await patchMetaRow({
+      accountLastPublishedAt: {
+        ...(meta.accountLastPublishedAt ?? {}),
+        [accountId]: publishedAt,
+      },
+    });
   }
 }
 
 export async function addScheduledPostPg(post: ScheduledPost) {
-  const data = await readInstagramPg();
-  data.scheduledPosts.unshift(post);
-  await writeInstagramPg(data);
+  await getDb().insert(scheduledPostsTable).values(scheduledPostValues(post));
   return post;
 }
 
@@ -330,92 +401,115 @@ export async function updateScheduledPostPg(
   id: string,
   patch: Partial<ScheduledPost>,
 ) {
-  const data = await readInstagramPg();
-  const idx = data.scheduledPosts.findIndex((p) => p.id === id);
-  if (idx < 0) return null;
-  data.scheduledPosts[idx] = { ...data.scheduledPosts[idx], ...patch };
-  await writeInstagramPg(data);
-  return data.scheduledPosts[idx];
+  const set = scheduledPostPatch(patch);
+  if (Object.keys(set).length === 0) {
+    const rows = await getDb()
+      .select()
+      .from(scheduledPostsTable)
+      .where(eq(scheduledPostsTable.id, id))
+      .limit(1);
+    return rows[0] ? rowToScheduledPost(rows[0]) : null;
+  }
+
+  const rows = await getDb()
+    .update(scheduledPostsTable)
+    .set(set)
+    .where(eq(scheduledPostsTable.id, id))
+    .returning();
+  return rows[0] ? rowToScheduledPost(rows[0]) : null;
 }
 
 export async function markExportPublishedOnAccountPg(
   accountId: string,
   exportId: string,
 ) {
-  const data = await readInstagramPg();
-  if (!data.publishedExportIds.includes(exportId)) {
-    data.publishedExportIds.push(exportId);
+  const meta = await ensureMetaRow();
+  const publishedExportIds = meta.publishedExportIds ?? [];
+  if (!publishedExportIds.includes(exportId)) {
+    await patchMetaRow({
+      publishedExportIds: [...publishedExportIds, exportId],
+    });
   }
-  data.scheduledPosts = data.scheduledPosts.map((post) => {
-    if (
-      post.accountId === accountId &&
-      post.exportId === exportId &&
-      (post.status === "queued" ||
-        post.status === "scheduled" ||
-        post.status === "failed")
-    ) {
-      return {
-        ...post,
-        status: "cancelled" as const,
-        error: "Video already published on this account",
-      };
-    }
-    return post;
-  });
-  await writeInstagramPg(data);
-  return data;
+
+  await getDb()
+    .update(scheduledPostsTable)
+    .set({
+      status: "cancelled",
+      error: "Video already published on this account",
+    })
+    .where(
+      and(
+        eq(scheduledPostsTable.accountId, accountId),
+        eq(scheduledPostsTable.exportId, exportId),
+        inArray(scheduledPostsTable.status, ["queued", "scheduled", "failed"]),
+      ),
+    );
+
+  return readInstagramPg();
 }
 
 export async function markExportPublishedPg(exportId: string) {
-  const data = await readInstagramPg();
-  if (!data.publishedExportIds.includes(exportId)) {
-    data.publishedExportIds.push(exportId);
+  const meta = await ensureMetaRow();
+  const publishedExportIds = meta.publishedExportIds ?? [];
+  if (!publishedExportIds.includes(exportId)) {
+    await patchMetaRow({
+      publishedExportIds: [...publishedExportIds, exportId],
+    });
   }
-  data.scheduledPosts = data.scheduledPosts.map((post) => {
-    if (
-      post.exportId === exportId &&
-      (post.status === "scheduled" || post.status === "failed")
-    ) {
-      return {
-        ...post,
-        status: "cancelled" as const,
-        error: "Video already published",
-      };
-    }
-    return post;
-  });
-  await writeInstagramPg(data);
-  return data;
+
+  await getDb()
+    .update(scheduledPostsTable)
+    .set({ status: "cancelled", error: "Video already published" })
+    .where(
+      and(
+        eq(scheduledPostsTable.exportId, exportId),
+        inArray(scheduledPostsTable.status, ["scheduled", "failed"]),
+      ),
+    );
+
+  return readInstagramPg();
 }
 
 export async function removeScheduledPostPg(id: string) {
-  const data = await readInstagramPg();
-  data.scheduledPosts = data.scheduledPosts.filter((p) => p.id !== id);
-  await writeInstagramPg(data);
+  await getDb()
+    .delete(scheduledPostsTable)
+    .where(eq(scheduledPostsTable.id, id));
 }
 
 export async function removeExportReferencesPg(exportId: string) {
-  const data = await readInstagramPg();
-  data.publishedExportIds = data.publishedExportIds.filter((id) => id !== exportId);
-  data.scheduledPosts = data.scheduledPosts.map((post) => {
-    if (post.exportId !== exportId) return post;
-    if (post.status === "published") return post;
-    return {
-      ...post,
-      status: "cancelled" as const,
-      error: "Video deleted",
-    };
+  const meta = await ensureMetaRow();
+  await patchMetaRow({
+    publishedExportIds: (meta.publishedExportIds ?? []).filter(
+      (id) => id !== exportId,
+    ),
   });
-  await writeInstagramPg(data);
+
+  await getDb()
+    .update(scheduledPostsTable)
+    .set({ status: "cancelled", error: "Video deleted" })
+    .where(
+      and(
+        eq(scheduledPostsTable.exportId, exportId),
+        inArray(scheduledPostsTable.status, [
+          "queued",
+          "scheduled",
+          "failed",
+          "publishing",
+        ]),
+      ),
+    );
 }
 
 export async function purgeExportFromInstagramPg(exportId: string) {
-  const data = await readInstagramPg();
-  data.publishedExportIds = data.publishedExportIds.filter((id) => id !== exportId);
-  data.scheduledPosts = data.scheduledPosts.filter(
-    (post) => post.exportId !== exportId,
-  );
-  await writeInstagramPg(data);
+  const meta = await ensureMetaRow();
+  await patchMetaRow({
+    publishedExportIds: (meta.publishedExportIds ?? []).filter(
+      (id) => id !== exportId,
+    ),
+  });
+  await getDb()
+    .delete(scheduledPostsTable)
+    .where(eq(scheduledPostsTable.exportId, exportId));
 }
 
 export async function writeInstagramStatePg(data: InstagramData): Promise<void> {
