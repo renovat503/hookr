@@ -59,7 +59,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "id is required." }, { status: 400 });
     }
 
-    const library = await readLibrary();
+    const library = await readLibrary("exports");
     const exp = library.exports.find((e) => e.id === id);
     if (!exp) {
       return NextResponse.json({ error: "Finished video not found." }, { status: 404 });

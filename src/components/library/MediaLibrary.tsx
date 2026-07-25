@@ -112,6 +112,7 @@ export function MediaLibrary({
   const [deletingDemoId, setDeletingDemoId] = useState<string | null>(null);
   const [deletingHookId, setDeletingHookId] = useState<string | null>(null);
   const [deletingMotionId, setDeletingMotionId] = useState<string | null>(null);
+  const [deletingExportId, setDeletingExportId] = useState<string | null>(null);
   const [savingMotionHookId, setSavingMotionHookId] = useState<string | null>(
     null,
   );
@@ -398,6 +399,31 @@ export function MediaLibrary({
       setError(err instanceof Error ? err.message : "Could not delete demo.");
     } finally {
       setDeletingDemoId(null);
+    }
+  };
+
+  const deleteExport = async (id: string, name: string) => {
+    if (
+      !window.confirm(
+        `Delete “${name}”?\n\nThis removes the video file and cancels any Instagram schedules for it.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingExportId(id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/library/exports?id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not delete export.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete export.");
+    } finally {
+      setDeletingExportId(null);
     }
   };
 
@@ -878,7 +904,22 @@ export function MediaLibrary({
                       {formatDate(exp.createdAt)}
                       {exp.runFolder ? ` · ${exp.runFolder}` : ""}
                     </p>
-                    <DownloadButton url={exp.url} filename={`${exp.id}.mp4`} />
+                    <div className="flex flex-wrap items-center gap-3">
+                      <DownloadButton url={exp.url} filename={`${exp.id}.mp4`} />
+                      <button
+                        type="button"
+                        disabled={deletingExportId === exp.id}
+                        onClick={() => void deleteExport(exp.id, exp.name)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-danger disabled:opacity-50"
+                      >
+                        {deletingExportId === exp.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </li>
               ))}
