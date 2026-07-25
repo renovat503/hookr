@@ -128,6 +128,25 @@ export async function readLibraryPg(): Promise<LibraryData> {
   };
 }
 
+/** Hooks, demos, and music only — for campaign pickers (skips heavy exports). */
+export async function readLibraryPgForPickers(): Promise<LibraryData> {
+  const db = getDb();
+  const [hookRows, demoRows, musicRows] = await Promise.all([
+    db.select().from(hooksTable).orderBy(desc(hooksTable.createdAt)),
+    db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
+    db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
+  ]);
+
+  return {
+    hooks: hookRows.map(rowToHook),
+    demos: demoRows.map(rowToDemo),
+    music: musicRows.map(rowToMusic),
+    motions: [],
+    characters: [],
+    exports: [],
+  };
+}
+
 export async function writeLibraryPg(data: LibraryData): Promise<void> {
   const db = getDb();
   await db.delete(exportsTable);

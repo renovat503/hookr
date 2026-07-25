@@ -66,25 +66,49 @@ export function CampaignSettings() {
   }, []);
 
   const load = useCallback(async () => {
-    const [libRes, capRes, campRes, sessionRes] = await Promise.all([
-      fetch("/api/library"),
-      fetch("/api/library/captions"),
-      fetch("/api/campaigns"),
-      fetch("/api/auth/session"),
-    ]);
-    const lib = (await libRes.json()) as LibraryData;
-    setLibrary(lib);
-    const capJson = (await capRes.json()) as { captions: LibraryCaption[] };
-    setCaptions(capJson.captions ?? []);
-    const campJson = (await campRes.json()) as { campaigns: Campaign[] };
-    setCampaigns(campJson.campaigns ?? []);
-    const session = (await sessionRes.json()) as {
-      activeCampaign?: Campaign | null;
-    };
-    if (session.activeCampaign) {
-      applyCampaign(session.activeCampaign);
+    setError(null);
+    try {
+      const [libRes, capRes, campRes] = await Promise.all([
+        fetch("/api/library?scope=pickers"),
+        fetch("/api/library/captions"),
+        fetch("/api/campaigns"),
+      ]);
+      const lib = (await libRes.json()) as LibraryData;
+      if (!libRes.ok) {
+        throw new Error("Could not load library assets.");
+      }
+      setLibrary(lib);
+      const capJson = (await capRes.json()) as {
+        captions?: LibraryCaption[];
+        error?: string;
+      };
+      if (!capRes.ok) {
+        throw new Error(capJson.error || "Could not load captions.");
+      }
+      setCaptions(capJson.captions ?? []);
+      const campJson = (await campRes.json()) as {
+        campaigns?: Campaign[];
+        activeId?: string | null;
+        error?: string;
+      };
+      if (!campRes.ok) {
+        throw new Error(campJson.error || "Could not load campaigns.");
+      }
+      const list = campJson.campaigns ?? [];
+      setCampaigns(list);
+      const active = campJson.activeId
+        ? list.find((c) => c.id === campJson.activeId) ?? null
+        : null;
+      if (active) {
+        applyCampaign(active);
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load campaign settings.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [applyCampaign]);
 
   useEffect(() => {

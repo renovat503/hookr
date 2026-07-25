@@ -13,6 +13,7 @@ import {
   addMotionPg,
   addMusicPg,
   readLibraryPg,
+  readLibraryPgForPickers,
   removeLibraryItemPg,
   updateHookPg,
   writeLibraryPg,
@@ -64,16 +65,33 @@ async function writeLibraryJson(data: LibraryData) {
   await writeFile(MANIFEST_PATH, JSON.stringify(data, null, 2));
 }
 
-export async function readLibrary(): Promise<LibraryData> {
+export type LibraryScope = "full" | "pickers";
+
+export async function readLibrary(
+  scope: LibraryScope = "full",
+): Promise<LibraryData> {
   if (usesPostgresRead()) {
     try {
-      return await readLibraryPg();
+      return scope === "pickers"
+        ? await readLibraryPgForPickers()
+        : await readLibraryPg();
     } catch (err) {
       console.error("[library] postgres read failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
     }
   }
-  return readLibraryJson();
+  const data = await readLibraryJson();
+  if (scope === "pickers") {
+    return {
+      hooks: data.hooks,
+      demos: data.demos,
+      music: data.music,
+      motions: [],
+      characters: [],
+      exports: [],
+    };
+  }
+  return data;
 }
 
 export async function writeLibrary(data: LibraryData) {

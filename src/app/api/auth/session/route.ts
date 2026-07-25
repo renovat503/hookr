@@ -5,7 +5,7 @@ import {
   SESSION_COOKIE,
   verifySessionToken,
 } from "@/lib/auth-session";
-import { readCampaigns, getActiveCampaign } from "@/lib/campaign-store";
+import { getCampaign } from "@/lib/campaign-store";
 
 export async function GET() {
   const jar = await cookies();
@@ -15,13 +15,10 @@ export async function GET() {
   }
 
   const activeId = jar.get(CAMPAIGN_COOKIE)?.value ?? null;
-  const data = await readCampaigns();
-  const active = activeId
-    ? data.campaigns.find((c) => c.id === activeId) ?? null
-    : null;
+  const activeCampaign = activeId ? await getCampaign(activeId) : null;
 
   return NextResponse.json({
     authenticated: true,
-    activeCampaign: active ?? (await getActiveCampaign(activeId)),
+    activeCampaign,
   });
 }
