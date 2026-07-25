@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -9,16 +9,25 @@ import {
 } from "lucide-react";
 import {
   addMonths,
+  combineDateAndTime,
   DRAG_POST_MIME,
   DRAG_QUEUE_MIME,
   formatDateIso,
   formatMonthYear,
-  formatTimeShort,
+  formatTimeInputValue,
   getMonthGrid,
   isPastDay,
   isToday,
   WEEKDAY_LABELS,
 } from "@/lib/calendar-utils";
+import {
+  findPostForSlot,
+  formatSlotTimeLabel,
+  isSlotAvailable,
+  isSlotPast,
+  slotKey,
+  type ScheduleSlot,
+} from "@/lib/posting-slots";
 import type { ScheduledPost, ScheduledPostStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -27,15 +36,13 @@ export type CalendarPost = ScheduledPost & {
   displayAt: string;
 };
 
-const MAX_VISIBLE_POSTS = 3;
-
 const STATUS_STYLES: Partial<Record<ScheduledPostStatus, string>> = {
   published: "opacity-60",
   failed: "border-danger/40 bg-danger/10",
   publishing: "border-warning/40 bg-warning/10",
 };
 
-function canDragPost(post: CalendarPost): boolean {
+function canDragPost(post: ScheduledPost): boolean {
   return (
     post.status === "scheduled" ||
     post.status === "failed" ||
@@ -44,11 +51,13 @@ function canDragPost(post: CalendarPost): boolean {
 }
 
 type ScheduleCalendarProps = {
-  posts: CalendarPost[];
+  posts: ScheduledPost[];
+  slotTimes: string[];
+  accountId: string;
+  occupied: Set<string>;
   month: Date;
   onMonthChange: (month: Date) => void;
-  onDayClick: (date: Date) => void;
-  onPostClick: (post: CalendarPost) => void;
+  onSlotClick: (slot: ScheduleSlot, post: ScheduledPost | null) => void;
   onNewPost: (date?: Date) => void;
   onPostReschedule: (postId: string, targetDate: Date) => void | Promise<void>;
   onQueueDrop?: (queueItemId: string, targetDate: Date) => void | Promise<void>;
@@ -57,38 +66,22 @@ type ScheduleCalendarProps = {
 
 export function ScheduleCalendar({
   posts,
+  slotTimes,
+  accountId,
+  occupied,
   month,
   onMonthChange,
-  onDayClick,
-  onPostClick,
+  onSlotClick,
   onNewPost,
   onPostReschedule,
   onQueueDrop,
   rescheduling = false,
 }: ScheduleCalendarProps) {
-  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [draggingPostId, setDraggingPostId] = useState<string | null>(null);
   const [dropTargetIso, setDropTargetIso] = useState<string | null>(null);
   const didDragRef = useRef(false);
 
-  const postsByDay = useMemo(() => {
-    const map = new Map<string, CalendarPost[]>();
-    for (const post of posts) {
-      const key = formatDateIso(new Date(post.displayAt));
-      const list = map.get(key) ?? [];
-      list.push(post);
-      map.set(key, list);
-    }
-    for (const list of map.values()) {
-      list.sort(
-        (a, b) =>
-          new Date(a.displayAt).getTime() - new Date(b.displayAt).getTime(),
-      );
-    }
-    return map;
-  }, [posts]);
-
-  const days = useMemo(() => getMonthGrid(month), [month]);
+  const days = getMonthGrid(month);
 
   const goToday = () => onMonthChange(new Date());
 
@@ -113,15 +106,21 @@ export function ScheduleCalendar({
     if (postId) {
       const post = posts.find((item) => item.id === postId);
       if (!post || !canDragPost(post)) return;
-      const sourceDay = formatDateIso(new Date(post.displayAt));
+      const sourceDay = formatDateIso(new Date(post.scheduledAt));
       if (sourceDay === dayIso) return;
       await onPostReschedule(postId, dayDate);
     }
   };
 
+  const cellMinHeight =
+    slotTimes.length <= 3
+      ? "min-h-[8.5rem]"
+      : slotTimes.length <= 4
+        ? "min-h-[10rem]"
+        : "min-h-[12rem]";
+
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-surface/70">
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex items-center gap-1">
           <button
@@ -161,7 +160,6 @@ export function ScheduleCalendar({
         </button>
       </div>
 
-      {/* Weekday headers */}
       <div className="grid grid-cols-7 border-b border-border bg-surface-raised/50">
         {WEEKDAY_LABELS.map((label) => (
           <div
@@ -173,23 +171,32 @@ export function ScheduleCalendar({
         ))}
       </div>
 
-      {/* Day grid */}
       <div className={cn("grid grid-cols-7", rescheduling && "pointer-events-none opacity-70")}>
         {days.map((day) => {
-          const dayPosts = postsByDay.get(day.iso) ?? [];
-          const isExpanded = expandedDay === day.iso;
-          const visiblePosts = isExpanded
-            ? dayPosts
-            : dayPosts.slice(0, MAX_VISIBLE_POSTS);
-          const hiddenCount = dayPosts.length - visiblePosts.length;
           const isDropTarget = dropTargetIso === day.iso;
-          const past = isPastDay(day.date);
+          const pastDay = isPastDay(day.date);
+
+          const orphanPosts = posts.filter((post) => {
+            if (post.accountId !== accountId) return false;
+            if (
+              post.status !== "scheduled" &&
+              post.status !== "publishing" &&
+              post.status !== "published" &&
+              post.status !== "failed"
+            ) {
+              return false;
+            }
+            const dateIso = formatDateIso(new Date(post.scheduledAt));
+            if (dateIso !== day.iso) return false;
+            const time = formatTimeInputValue(post.scheduledAt);
+            return !slotTimes.includes(time);
+          });
 
           return (
             <div
               key={day.iso}
               onDragOver={(e) => {
-                if (past) return;
+                if (pastDay) return;
                 if (
                   !e.dataTransfer.types.includes(DRAG_POST_MIME) &&
                   !e.dataTransfer.types.includes(DRAG_QUEUE_MIME)
@@ -208,33 +215,29 @@ export function ScheduleCalendar({
               }}
               onDrop={(e) => void handleDrop(day.iso, day.date, e)}
               className={cn(
-                "group relative min-h-[7.5rem] border-b border-r border-border p-1.5 transition-colors sm:min-h-[8.5rem] sm:p-2",
+                "group relative border-b border-r border-border p-1.5 sm:p-2",
+                cellMinHeight,
                 !day.inMonth && "bg-surface/40",
-                past && "bg-surface/30",
+                pastDay && "bg-surface/30",
                 isDropTarget && "bg-accent/10 ring-2 ring-inset ring-accent/50",
               )}
             >
               <div className="mb-1 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!past) onDayClick(day.date);
-                  }}
-                  disabled={past}
+                <span
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium sm:text-sm",
                     isToday(day.date)
                       ? "bg-accent text-accent-fg"
-                      : past
-                        ? "cursor-not-allowed text-muted/40"
+                      : pastDay
+                        ? "text-muted/40"
                         : day.inMonth
-                          ? "text-foreground hover:bg-surface-hover"
-                          : "text-muted/50 hover:bg-surface-hover",
+                          ? "text-foreground"
+                          : "text-muted/50",
                   )}
                 >
                   {day.date.getDate()}
-                </button>
-                {!past ? (
+                </span>
+                {!pastDay ? (
                   <button
                     type="button"
                     onClick={() => onNewPost(day.date)}
@@ -247,77 +250,121 @@ export function ScheduleCalendar({
               </div>
 
               <div className="space-y-1">
-                {visiblePosts.map((post) => {
+                {slotTimes.map((time) => {
+                  const post = findPostForSlot(posts, accountId, day.iso, time);
+                  const slotPast = isSlotPast(day.iso, time);
+                  const available = isSlotAvailable(day.iso, time, occupied);
+                  const slot: ScheduleSlot = {
+                    date: day.date,
+                    dateIso: day.iso,
+                    time,
+                    scheduledAt: combineDateAndTime(day.iso, time),
+                    key: slotKey(day.iso, time),
+                  };
+
+                  if (post) {
+                    const draggable = canDragPost(post);
+                    const isDragging = draggingPostId === post.id;
+
+                    return (
+                      <div
+                        key={time}
+                        draggable={draggable}
+                        onDragStart={(e) => {
+                          if (!draggable) return;
+                          didDragRef.current = false;
+                          setDraggingPostId(post.id);
+                          e.dataTransfer.setData(DRAG_POST_MIME, post.id);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDrag={() => {
+                          didDragRef.current = true;
+                        }}
+                        onDragEnd={() => {
+                          clearDragState();
+                          window.setTimeout(() => {
+                            didDragRef.current = false;
+                          }, 0);
+                        }}
+                        onClick={() => {
+                          if (didDragRef.current) return;
+                          onSlotClick(slot, post);
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onSlotClick(slot, post);
+                          }
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-1 rounded-lg border px-1.5 py-1 text-left transition-colors",
+                          post.status === "failed"
+                            ? "border-danger/40 bg-danger/10"
+                            : "border-accent/40 bg-accent/10 hover:bg-accent/15",
+                          STATUS_STYLES[post.status],
+                          draggable && "cursor-grab active:cursor-grabbing",
+                          isDragging && "opacity-40",
+                        )}
+                      >
+                        <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af] text-[7px] font-bold text-white">
+                          IG
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[10px] font-medium leading-tight sm:text-[11px]">
+                          {formatSlotTimeLabel(time)}
+                        </span>
+                        <Clapperboard className="h-2.5 w-2.5 shrink-0 text-muted" />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      disabled={slotPast || !available}
+                      onClick={() => onSlotClick(slot, null)}
+                      className={cn(
+                        "w-full rounded-lg border border-dashed px-1.5 py-1.5 text-center text-[10px] font-medium transition-colors sm:text-[11px]",
+                        slotPast
+                          ? "cursor-not-allowed border-border/40 text-muted/30"
+                          : "border-border text-muted hover:border-accent hover:bg-accent/5 hover:text-foreground",
+                      )}
+                    >
+                      {formatSlotTimeLabel(time)}
+                    </button>
+                  );
+                })}
+
+                {orphanPosts.map((post) => {
                   const draggable = canDragPost(post);
-                  const isDragging = draggingPostId === post.id;
+                  const slot: ScheduleSlot = {
+                    date: day.date,
+                    dateIso: day.iso,
+                    time: formatTimeInputValue(post.scheduledAt),
+                    scheduledAt: new Date(post.scheduledAt),
+                    key: `${post.id}-orphan`,
+                  };
 
                   return (
                     <div
                       key={post.id}
                       draggable={draggable}
-                      onDragStart={(e) => {
-                        if (!draggable) return;
-                        didDragRef.current = false;
-                        setDraggingPostId(post.id);
-                        e.dataTransfer.setData(DRAG_POST_MIME, post.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDrag={() => {
-                        didDragRef.current = true;
-                      }}
-                      onDragEnd={() => {
-                        clearDragState();
-                        window.setTimeout(() => {
-                          didDragRef.current = false;
-                        }, 0);
-                      }}
-                      onClick={() => {
-                        if (didDragRef.current) return;
-                        onPostClick(post);
-                      }}
+                      onClick={() => onSlotClick(slot, post)}
                       role="button"
                       tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          onPostClick(post);
-                        }
-                      }}
                       className={cn(
-                        "flex w-full items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-1.5 py-1 text-left transition-colors hover:bg-surface-hover",
-                        STATUS_STYLES[post.status],
-                        draggable && "cursor-grab active:cursor-grabbing",
-                        isDragging && "opacity-40",
+                        "flex w-full items-center gap-1 rounded-lg border border-border bg-surface-raised px-1.5 py-1 text-left text-[10px]",
+                        draggable && "cursor-grab",
                       )}
                     >
-                      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af] text-[8px] font-bold text-white">
-                        IG
+                      <span className="truncate font-medium">
+                        {formatSlotTimeLabel(formatTimeInputValue(post.scheduledAt))}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium leading-tight sm:text-xs">
-                        {formatTimeShort(post.displayAt)}
-                      </span>
-                      <Clapperboard className="h-3 w-3 shrink-0 text-muted" />
                     </div>
                   );
                 })}
-                {hiddenCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setExpandedDay(day.iso)}
-                    className="w-full px-1 text-left text-[11px] text-muted hover:text-foreground"
-                  >
-                    {hiddenCount} more
-                  </button>
-                ) : null}
-                {isExpanded && dayPosts.length > MAX_VISIBLE_POSTS ? (
-                  <button
-                    type="button"
-                    onClick={() => setExpandedDay(null)}
-                    className="w-full px-1 text-left text-[11px] text-muted hover:text-foreground"
-                  >
-                    Show less
-                  </button>
-                ) : null}
               </div>
             </div>
           );

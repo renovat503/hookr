@@ -17,7 +17,6 @@ import { BulkScheduleModal } from "@/components/instagram/BulkScheduleModal";
 import { PostingGoalPanel } from "@/components/instagram/PostingGoalPanel";
 import {
   ScheduleCalendar,
-  type CalendarPost,
 } from "@/components/instagram/ScheduleCalendar";
 import { SchedulePostModal } from "@/components/instagram/SchedulePostModal";
 import { ScheduleWeekGrid } from "@/components/instagram/ScheduleWeekGrid";
@@ -67,22 +66,6 @@ type InstagramPayload = {
 };
 
 type ViewMode = "week" | "month" | "queue";
-
-const CALENDAR_STATUSES = new Set([
-  "scheduled",
-  "publishing",
-  "published",
-  "failed",
-]);
-
-function toCalendarPost(
-  post: ScheduledPost & { exportUrl?: string | null },
-): CalendarPost {
-  return {
-    ...post,
-    displayAt: post.publishedAt ?? post.scheduledAt,
-  };
-}
 
 export function InstagramScheduler() {
   const [data, setData] = useState<InstagramPayload | null>(null);
@@ -164,17 +147,6 @@ export function InstagramScheduler() {
 
   const availableExports = activeQueue?.available ?? data?.exports ?? [];
 
-  const calendarPosts = useMemo(() => {
-    if (!data || !activeAccountId) return [];
-    return data.scheduledPosts
-      .filter(
-        (post) =>
-          post.accountId === activeAccountId &&
-          CALENDAR_STATUSES.has(post.status),
-      )
-      .map(toCalendarPost);
-  }, [data, activeAccountId]);
-
   const unscheduledQueue = activeQueue?.queue ?? [];
 
   const activePostingGoal = useMemo(
@@ -214,7 +186,7 @@ export function InstagramScheduler() {
     setModalOpen(true);
   };
 
-  const openEditModal = (post: CalendarPost | ScheduledPost) => {
+  const openEditModal = (post: ScheduledPost & { exportUrl?: string | null }) => {
     setModalMode("edit");
     setEditingPost(post);
     setModalDate(undefined);
@@ -634,11 +606,13 @@ export function InstagramScheduler() {
             />
           ) : (
             <ScheduleCalendar
-              posts={calendarPosts}
+              posts={data.scheduledPosts}
+              slotTimes={activePostingGoal.slotTimes}
+              accountId={activeAccountId}
+              occupied={occupiedSlots}
               month={calendarMonth}
               onMonthChange={setCalendarMonth}
-              onDayClick={(date) => openCreateModal(date)}
-              onPostClick={openEditModal}
+              onSlotClick={openSlotModal}
               onNewPost={openCreateModal}
               onPostReschedule={reschedulePost}
               onQueueDrop={scheduleQueueOnDate}
