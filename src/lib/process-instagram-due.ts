@@ -19,10 +19,11 @@ import {
   toPublicVideoUrl,
 } from "@/lib/instagram";
 import { resolveToLocalPath } from "@/lib/storage/media";
+import { purgePublishedExport } from "@/lib/purge-published-export";
 import {
   addScheduledPost,
   isExportPublishedOnAccount,
-  markExportPublishedOnAccount,
+  purgeExportFromInstagram,
   readInstagram,
   recordAccountPublished,
   removeScheduledPost,
@@ -92,18 +93,13 @@ async function publishScheduledPost(
     });
 
     const publishedAt = new Date().toISOString();
-    await updateScheduledPost(post.id, {
-      status: "published",
-      publishedAt,
-      publishedMediaId: published.mediaId,
-      exportName: post.exportName || exp.name,
-      error: null,
-    });
-    await markExportPublishedOnAccount(post.accountId, post.exportId);
     await recordAccountPublished(post.accountId, publishedAt);
 
-    if (!instagram.publishedExportIds.includes(post.exportId)) {
-      instagram.publishedExportIds.push(post.exportId);
+    try {
+      await purgePublishedExport(post.exportId, exp.url);
+    } catch (err) {
+      console.error("[instagram] purge after publish failed", post.exportId, err);
+      await purgeExportFromInstagram(post.exportId).catch(() => undefined);
     }
 
     return {

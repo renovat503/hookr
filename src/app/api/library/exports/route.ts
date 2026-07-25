@@ -3,7 +3,7 @@ import {
   ExportDuplicateError,
   exportLibraryVideo,
 } from "@/lib/export-video";
-import { removeExportReferences } from "@/lib/instagram-store";
+import { purgeExportFromInstagram } from "@/lib/instagram-store";
 import { deleteMedia } from "@/lib/storage/media";
 import { readLibrary, removeLibraryItem } from "@/lib/library-store";
 import type { OverlayStyle } from "@/lib/types";
@@ -67,7 +67,7 @@ export async function DELETE(request: Request) {
 
     await deleteMedia(exp.url);
     await removeLibraryItem("exports", id);
-    await removeExportReferences(id);
+    await purgeExportFromInstagram(id);
 
     return NextResponse.json({ ok: true, id });
   } catch (err) {

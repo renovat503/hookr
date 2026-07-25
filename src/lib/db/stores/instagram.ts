@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { getAccountLastPublishedAt, normalizeAutoPostIntervalHours } from "@/lib/instagram-autopost";
 import { isInstagramRateLimitError } from "@/lib/instagram-errors";
+import { normalizePostingGoal } from "@/lib/posting-slots";
 import { getDb } from "@/lib/db/client";
 import {
   instagramAccounts as instagramAccountsTable,
@@ -8,6 +9,7 @@ import {
   scheduledPosts as scheduledPostsTable,
 } from "@/lib/db/schema";
 import type {
+  AccountPostingGoal,
   InstagramAccount,
   InstagramData,
   ScheduledPost,
@@ -57,6 +59,12 @@ function normalize(data: Partial<InstagramData>): InstagramData {
     autoPostEnabled: data.autoPostEnabled ?? true,
     autoPostIntervalHours: normalizeAutoPostIntervalHours(
       data.autoPostIntervalHours,
+    ),
+    accountPostingGoals: Object.fromEntries(
+      Object.entries(data.accountPostingGoals ?? {}).map(([accountId, goal]) => [
+        accountId,
+        normalizePostingGoal(goal),
+      ]),
     ),
     apiRateLimitedUntil: data.apiRateLimitedUntil ?? null,
   };
@@ -145,6 +153,7 @@ export async function readInstagramPg(): Promise<InstagramData> {
     autoPostIntervalHours: normalizeAutoPostIntervalHours(
       meta.autoPostIntervalHours,
     ),
+    accountPostingGoals: meta.accountPostingGoals ?? {},
     apiRateLimitedUntil: meta.apiRateLimitedUntil,
   });
 }
@@ -200,6 +209,7 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
       accountLastPublishedAt: normalized.accountLastPublishedAt,
       autoPostEnabled: normalized.autoPostEnabled,
       autoPostIntervalHours: normalized.autoPostIntervalHours,
+      accountPostingGoals: normalized.accountPostingGoals ?? {},
       apiRateLimitedUntil: normalized.apiRateLimitedUntil,
     })
     .onConflictDoUpdate({
@@ -209,6 +219,7 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
         accountLastPublishedAt: normalized.accountLastPublishedAt,
         autoPostEnabled: normalized.autoPostEnabled,
         autoPostIntervalHours: normalized.autoPostIntervalHours,
+        accountPostingGoals: normalized.accountPostingGoals ?? {},
         apiRateLimitedUntil: normalized.apiRateLimitedUntil,
       },
     });
@@ -262,6 +273,19 @@ export async function setAutoPostSettingsPg(patch: {
     autoPostEnabled: data.autoPostEnabled,
     autoPostIntervalHours: data.autoPostIntervalHours,
   };
+}
+
+export async function setAccountPostingGoalPg(
+  accountId: string,
+  goal: AccountPostingGoal,
+) {
+  const data = await readInstagramPg();
+  data.accountPostingGoals = {
+    ...(data.accountPostingGoals ?? {}),
+    [accountId]: normalizePostingGoal(goal),
+  };
+  await writeInstagramPg(data);
+  return data.accountPostingGoals[accountId];
 }
 
 export async function setApiRateLimitedUntilPg(until: string | null) {
@@ -382,6 +406,15 @@ export async function removeExportReferencesPg(exportId: string) {
       error: "Video deleted",
     };
   });
+  await writeInstagramPg(data);
+}
+
+export async function purgeExportFromInstagramPg(exportId: string) {
+  const data = await readInstagramPg();
+  data.publishedExportIds = data.publishedExportIds.filter((id) => id !== exportId);
+  data.scheduledPosts = data.scheduledPosts.filter(
+    (post) => post.exportId !== exportId,
+  );
   await writeInstagramPg(data);
 }
 

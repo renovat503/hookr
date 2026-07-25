@@ -20,8 +20,13 @@ import {
   isPubliclyReachableMediaUrl,
 } from "@/lib/instagram";
 import {
+  getPostingGoalForAccount,
+  POSTING_GOAL_PRESETS,
+} from "@/lib/posting-slots";
+import {
   publicInstagramAccount,
   readInstagram,
+  setAccountPostingGoal,
   setAutoPostSettings,
 } from "@/lib/instagram-store";
 import { readLibrary } from "@/lib/library-store";
@@ -79,6 +84,13 @@ export async function GET(request: Request) {
       })),
       exports: readyExports,
       queues,
+      postingGoals: Object.fromEntries(
+        instagram.accounts.map((account) => [
+          account.id,
+          getPostingGoalForAccount(instagram.accountPostingGoals, account.id),
+        ]),
+      ),
+      postingGoalPresets: POSTING_GOAL_PRESETS,
       autoPost: {
         enabled: instagram.autoPostEnabled,
         intervalHours: instagram.autoPostIntervalHours,
@@ -112,7 +124,21 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       autoPostEnabled?: boolean;
       autoPostIntervalHours?: number;
+      accountId?: string;
+      postingGoal?: { postsPerDay?: number; slotTimes?: string[] };
     };
+
+    if (
+      body.accountId &&
+      body.postingGoal &&
+      typeof body.postingGoal.postsPerDay === "number"
+    ) {
+      const goal = await setAccountPostingGoal(body.accountId, {
+        postsPerDay: body.postingGoal.postsPerDay,
+        slotTimes: body.postingGoal.slotTimes ?? [],
+      });
+      return NextResponse.json({ postingGoal: goal });
+    }
 
     if (
       typeof body.autoPostEnabled !== "boolean" &&
@@ -121,7 +147,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Provide autoPostEnabled and/or autoPostIntervalHours (4, 5, or 6).",
+            "Provide postingGoal, autoPostEnabled, and/or autoPostIntervalHours.",
         },
         { status: 400 },
       );

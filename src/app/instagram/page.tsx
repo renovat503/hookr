@@ -11,7 +11,7 @@ export default function InstagramPage() {
               Instagram
             </h1>
             <p className="text-xs text-muted sm:text-sm">
-              Schedule Reels on a calendar or manage account queues
+              Set posting goals, fill calendar slots, or bulk schedule Reels
             </p>
           </div>
         </div>

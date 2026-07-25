@@ -31,6 +31,10 @@ export async function ensureInstagramMeta(): Promise<void> {
       alter table scheduled_posts
       add column if not exists queue_position integer
     `);
+    await getDb().execute(sql`
+      alter table instagram_meta
+      add column if not exists account_posting_goals jsonb not null default '{}'::jsonb
+    `);
     console.log("[db] instagram_meta ready.");
   } catch (err) {
     console.warn(

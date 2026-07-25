@@ -6,25 +6,37 @@ import {
   ArrowUp,
   CalendarDays,
   Clapperboard,
+  Layers,
   Link2,
   List,
   Loader2,
   Plus,
   Trash2,
 } from "lucide-react";
+import { BulkScheduleModal } from "@/components/instagram/BulkScheduleModal";
+import { PostingGoalPanel } from "@/components/instagram/PostingGoalPanel";
 import {
   ScheduleCalendar,
   type CalendarPost,
 } from "@/components/instagram/ScheduleCalendar";
 import { SchedulePostModal } from "@/components/instagram/SchedulePostModal";
+import { ScheduleWeekGrid } from "@/components/instagram/ScheduleWeekGrid";
 import { ReelPlayer } from "@/components/ui/ReelPlayer";
 import {
   defaultScheduleDateTime,
   DRAG_QUEUE_MIME,
+  isPastDay,
   moveScheduledTimeToDate,
   startOfMonth,
+  validateScheduleInstant,
 } from "@/lib/calendar-utils";
-import type { LibraryExport, ScheduledPost } from "@/lib/types";
+import {
+  getNextAvailableSlots,
+  getOccupiedSlotKeys,
+  getPostingGoalForAccount,
+  type ScheduleSlot,
+} from "@/lib/posting-slots";
+import type { AccountPostingGoal, LibraryExport, ScheduledPost } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type PublicAccount = {
@@ -46,6 +58,7 @@ type InstagramPayload = {
   exports: LibraryExport[];
   scheduledPosts: (ScheduledPost & { exportUrl?: string | null })[];
   queues: Record<string, AccountQueue>;
+  postingGoals?: Record<string, AccountPostingGoal>;
   autoPost?: {
     enabled: boolean;
     intervalHours?: 4 | 5 | 6;
@@ -53,7 +66,7 @@ type InstagramPayload = {
   };
 };
 
-type ViewMode = "calendar" | "queue";
+type ViewMode = "week" | "month" | "queue";
 
 const CALENDAR_STATUSES = new Set([
   "scheduled",
@@ -78,11 +91,14 @@ export function InstagramScheduler() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeAccountId, setActiveAccountId] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("calendar");
+  const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
+  const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [modalOpen, setModalOpen] = useState(false);
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [modalDate, setModalDate] = useState<Date | undefined>();
+  const [modalTime, setModalTime] = useState<string | undefined>();
   const [editingPost, setEditingPost] = useState<
     (ScheduledPost & { exportUrl?: string | null }) | null
   >(null);
@@ -161,18 +177,57 @@ export function InstagramScheduler() {
 
   const unscheduledQueue = activeQueue?.queue ?? [];
 
-  const openCreateModal = (date?: Date) => {
+  const activePostingGoal = useMemo(
+    () =>
+      getPostingGoalForAccount(data?.postingGoals, activeAccountId),
+    [data?.postingGoals, activeAccountId],
+  );
+
+  const occupiedSlots = useMemo(() => {
+    if (!data || !activeAccountId) return new Set<string>();
+    return getOccupiedSlotKeys(
+      data.scheduledPosts,
+      activeAccountId,
+      activePostingGoal.slotTimes,
+    );
+  }, [data, activeAccountId, activePostingGoal.slotTimes]);
+
+  const bulkPreviewSlots = useMemo(() => {
+    if (!availableExports.length) return [];
+    return getNextAvailableSlots(
+      activePostingGoal.slotTimes,
+      occupiedSlots,
+      Math.min(availableExports.length, 60),
+    );
+  }, [activePostingGoal.slotTimes, occupiedSlots, availableExports.length]);
+
+  const openCreateModal = (date?: Date, time?: string) => {
+    if (date && isPastDay(date)) {
+      setError("Cannot schedule on a past date.");
+      setNotice(null);
+      return;
+    }
     setModalMode("create");
     setEditingPost(null);
     setModalDate(date);
+    setModalTime(time);
     setModalOpen(true);
   };
 
-  const openEditModal = (post: CalendarPost) => {
+  const openEditModal = (post: CalendarPost | ScheduledPost) => {
     setModalMode("edit");
     setEditingPost(post);
     setModalDate(undefined);
+    setModalTime(undefined);
     setModalOpen(true);
+  };
+
+  const openSlotModal = (slot: ScheduleSlot, post: ScheduledPost | null) => {
+    if (post) {
+      openEditModal(post);
+      return;
+    }
+    openCreateModal(slot.date, slot.time);
   };
 
   const scheduleQueueItem = (item: QueueItem) => {
@@ -199,11 +254,24 @@ export function InstagramScheduler() {
     const post = data?.scheduledPosts.find((item) => item.id === postId);
     if (!post) return;
 
+    if (isPastDay(targetDate)) {
+      setError("Cannot schedule on a past date.");
+      setNotice(null);
+      return;
+    }
+
+    const nextAt = moveScheduledTimeToDate(post.scheduledAt, targetDate);
+    const scheduleError = validateScheduleInstant(nextAt);
+    if (scheduleError) {
+      setError(scheduleError);
+      setNotice(null);
+      return;
+    }
+
     setRescheduling(true);
     setError(null);
     setNotice(null);
     try {
-      const nextAt = moveScheduledTimeToDate(post.scheduledAt, targetDate);
       await patchScheduledAt(postId, nextAt.toISOString());
       setNotice("Post rescheduled.");
       await load();
@@ -215,12 +283,30 @@ export function InstagramScheduler() {
   };
 
   const scheduleQueueOnDate = async (queueItemId: string, targetDate: Date) => {
+    if (isPastDay(targetDate)) {
+      setError("Cannot schedule on a past date.");
+      setNotice(null);
+      return;
+    }
+
+    const scheduledAt = defaultScheduleDateTime(targetDate);
+    if (!scheduledAt) {
+      setError("Cannot schedule on a past date.");
+      setNotice(null);
+      return;
+    }
+    const scheduleError = validateScheduleInstant(scheduledAt);
+    if (scheduleError) {
+      setError(scheduleError);
+      setNotice(null);
+      return;
+    }
+
     setRescheduling(true);
     setError(null);
     setNotice(null);
     try {
-      const scheduledAt = defaultScheduleDateTime(targetDate).toISOString();
-      await patchScheduledAt(queueItemId, scheduledAt);
+      await patchScheduledAt(queueItemId, scheduledAt.toISOString());
       setNotice("Post scheduled.");
       await load();
     } catch (err) {
@@ -291,6 +377,61 @@ export function InstagramScheduler() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reorder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const savePostingGoal = async (goal: AccountPostingGoal) => {
+    if (!activeAccountId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/instagram", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          postingGoal: goal,
+        }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not save posting goal.");
+      setNotice("Posting goal saved.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save posting goal.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkSchedule = async (exportIds: string[]) => {
+    if (!activeAccountId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/instagram/schedule/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId, exportIds }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        scheduled?: ScheduledPost[];
+        skipped?: Array<{ exportId: string; reason: string }>;
+      };
+      if (!res.ok) throw new Error(json.error || "Bulk schedule failed.");
+      const count = json.scheduled?.length ?? 0;
+      setNotice(
+        count
+          ? `Scheduled ${count} video${count === 1 ? "" : "s"}.`
+          : "Bulk schedule completed.",
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk schedule failed.");
+      throw err;
     } finally {
       setBusy(false);
     }
@@ -395,16 +536,29 @@ export function InstagramScheduler() {
           <div className="inline-flex rounded-xl border border-border bg-surface-raised p-1">
             <button
               type="button"
-              onClick={() => setViewMode("calendar")}
+              onClick={() => setViewMode("week")}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium",
-                viewMode === "calendar"
+                viewMode === "week"
                   ? "bg-accent text-accent-fg"
                   : "text-muted hover:text-foreground",
               )}
             >
               <CalendarDays className="h-4 w-4" />
-              Calendar
+              Week
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("month")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium",
+                viewMode === "month"
+                  ? "bg-accent text-accent-fg"
+                  : "text-muted hover:text-foreground",
+              )}
+            >
+              <CalendarDays className="h-4 w-4" />
+              Month
             </button>
             <button
               type="button"
@@ -434,19 +588,63 @@ export function InstagramScheduler() {
             Connect Instagram
           </a>
         </div>
-      ) : viewMode === "calendar" ? (
+      ) : viewMode === "week" || viewMode === "month" ? (
         <>
-          <ScheduleCalendar
-            posts={calendarPosts}
-            month={calendarMonth}
-            onMonthChange={setCalendarMonth}
-            onDayClick={(date) => openCreateModal(date)}
-            onPostClick={openEditModal}
-            onNewPost={openCreateModal}
-            onPostReschedule={reschedulePost}
-            onQueueDrop={scheduleQueueOnDate}
-            rescheduling={rescheduling}
-          />
+          {activeAccount ? (
+            <PostingGoalPanel
+              accountId={activeAccountId}
+              username={activeAccount.username}
+              goal={activePostingGoal}
+              disabled={busy || rescheduling}
+              onSave={savePostingGoal}
+            />
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={busy || !availableExports.length || !bulkPreviewSlots.length}
+              onClick={() => setBulkModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
+            >
+              <Layers className="h-4 w-4" />
+              Bulk schedule
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => openCreateModal()}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              New post
+            </button>
+          </div>
+
+          {viewMode === "week" ? (
+            <ScheduleWeekGrid
+              weekAnchor={weekAnchor}
+              slotTimes={activePostingGoal.slotTimes}
+              posts={data.scheduledPosts}
+              accountId={activeAccountId}
+              occupied={occupiedSlots}
+              onWeekChange={setWeekAnchor}
+              onSlotClick={openSlotModal}
+              disabled={rescheduling}
+            />
+          ) : (
+            <ScheduleCalendar
+              posts={calendarPosts}
+              month={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              onDayClick={(date) => openCreateModal(date)}
+              onPostClick={openEditModal}
+              onNewPost={openCreateModal}
+              onPostReschedule={reschedulePost}
+              onQueueDrop={scheduleQueueOnDate}
+              rescheduling={rescheduling}
+            />
+          )}
 
           {unscheduledQueue.length > 0 ? (
             <section className="rounded-2xl border border-border bg-surface/70 p-4">
@@ -657,6 +855,7 @@ export function InstagramScheduler() {
           ]),
         )}
         initialDate={modalDate}
+        initialTime={modalTime}
         editingPost={editingPost}
         onClose={() => setModalOpen(false)}
         onSaved={async () => {
@@ -665,6 +864,15 @@ export function InstagramScheduler() {
           );
           await load();
         }}
+      />
+
+      <BulkScheduleModal
+        open={bulkModalOpen}
+        accountUsername={activeAccount?.username ?? ""}
+        exports={availableExports}
+        previewSlots={bulkPreviewSlots}
+        onClose={() => setBulkModalOpen(false)}
+        onConfirm={bulkSchedule}
       />
     </div>
   );

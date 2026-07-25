@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateScheduleInstant } from "@/lib/calendar-utils";
 import {
   addScheduledPost,
   isExportPublishedOnAccount,
@@ -89,11 +90,11 @@ export async function POST(request: Request) {
 
     if (publishNow) {
       scheduledAt = new Date();
-    } else if (scheduledAt.getTime() < Date.now() - 60_000) {
-      return NextResponse.json(
-        { error: "Schedule time must be in the future." },
-        { status: 400 },
-      );
+    } else {
+      const scheduleError = validateScheduleInstant(scheduledAt);
+      if (scheduleError) {
+        return NextResponse.json({ error: scheduleError }, { status: 400 });
+      }
     }
 
     const post: ScheduledPost = {

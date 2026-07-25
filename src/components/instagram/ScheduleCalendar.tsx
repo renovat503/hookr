@@ -15,6 +15,7 @@ import {
   formatMonthYear,
   formatTimeShort,
   getMonthGrid,
+  isPastDay,
   isToday,
   WEEKDAY_LABELS,
 } from "@/lib/calendar-utils";
@@ -100,6 +101,8 @@ export function ScheduleCalendar({
     e.preventDefault();
     clearDragState();
 
+    if (isPastDay(dayDate)) return;
+
     const queueId = e.dataTransfer.getData(DRAG_QUEUE_MIME);
     const postId = e.dataTransfer.getData(DRAG_POST_MIME);
 
@@ -180,11 +183,13 @@ export function ScheduleCalendar({
             : dayPosts.slice(0, MAX_VISIBLE_POSTS);
           const hiddenCount = dayPosts.length - visiblePosts.length;
           const isDropTarget = dropTargetIso === day.iso;
+          const past = isPastDay(day.date);
 
           return (
             <div
               key={day.iso}
               onDragOver={(e) => {
+                if (past) return;
                 if (
                   !e.dataTransfer.types.includes(DRAG_POST_MIME) &&
                   !e.dataTransfer.types.includes(DRAG_QUEUE_MIME)
@@ -205,32 +210,40 @@ export function ScheduleCalendar({
               className={cn(
                 "group relative min-h-[7.5rem] border-b border-r border-border p-1.5 transition-colors sm:min-h-[8.5rem] sm:p-2",
                 !day.inMonth && "bg-surface/40",
+                past && "bg-surface/30",
                 isDropTarget && "bg-accent/10 ring-2 ring-inset ring-accent/50",
               )}
             >
               <div className="mb-1 flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => onDayClick(day.date)}
+                  onClick={() => {
+                    if (!past) onDayClick(day.date);
+                  }}
+                  disabled={past}
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium sm:text-sm",
                     isToday(day.date)
                       ? "bg-accent text-accent-fg"
-                      : day.inMonth
-                        ? "text-foreground hover:bg-surface-hover"
-                        : "text-muted/50 hover:bg-surface-hover",
+                      : past
+                        ? "cursor-not-allowed text-muted/40"
+                        : day.inMonth
+                          ? "text-foreground hover:bg-surface-hover"
+                          : "text-muted/50 hover:bg-surface-hover",
                   )}
                 >
                   {day.date.getDate()}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onNewPost(day.date)}
-                  className="rounded-md p-1 text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground group-hover:opacity-100"
-                  aria-label={`Schedule post on ${day.iso}`}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
+                {!past ? (
+                  <button
+                    type="button"
+                    onClick={() => onNewPost(day.date)}
+                    className="rounded-md p-1 text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground group-hover:opacity-100"
+                    aria-label={`Schedule post on ${day.iso}`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
               </div>
 
               <div className="space-y-1">

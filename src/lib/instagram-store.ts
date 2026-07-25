@@ -13,10 +13,12 @@ import {
   readInstagramPg,
   recordAccountPublishedPg,
   removeExportReferencesPg,
+  purgeExportFromInstagramPg,
   removeInstagramAccountPg,
   removeScheduledPostPg,
   setApiRateLimitedUntilPg,
   setAutoPostSettingsPg,
+  setAccountPostingGoalPg,
   updateScheduledPostPg,
   upsertInstagramAccountsPg,
   writeInstagramStatePg,
@@ -28,7 +30,9 @@ import {
   isExportPublishedOnAccount,
   nextQueuePosition,
 } from "./instagram-queue";
+import { normalizePostingGoal } from "./posting-slots";
 import type {
+  AccountPostingGoal,
   InstagramAccount,
   InstagramData,
   ScheduledPost,
@@ -78,6 +82,12 @@ function normalize(data: Partial<InstagramData>): InstagramData {
     autoPostEnabled: data.autoPostEnabled ?? true,
     autoPostIntervalHours: normalizeAutoPostIntervalHours(
       data.autoPostIntervalHours,
+    ),
+    accountPostingGoals: Object.fromEntries(
+      Object.entries(data.accountPostingGoals ?? {}).map(([accountId, goal]) => [
+        accountId,
+        normalizePostingGoal(goal),
+      ]),
     ),
     apiRateLimitedUntil: data.apiRateLimitedUntil ?? null,
   };
@@ -208,6 +218,29 @@ export async function setAutoPostSettings(patch: {
 
 export async function setAutoPostEnabled(enabled: boolean) {
   return setAutoPostSettings({ enabled });
+}
+
+export async function setAccountPostingGoal(
+  accountId: string,
+  goal: AccountPostingGoal,
+) {
+  const normalized = normalizePostingGoal(goal);
+  if (usesPostgresWrite()) {
+    try {
+      return await setAccountPostingGoalPg(accountId, normalized);
+    } catch (err) {
+      console.error("[instagram] postgres posting goal failed", err);
+      if (!usesJsonWrite()) throw err;
+    }
+  }
+
+  const data = await readInstagramJson();
+  data.accountPostingGoals = {
+    ...(data.accountPostingGoals ?? {}),
+    [accountId]: normalized,
+  };
+  await syncInstagram(data);
+  return normalized;
 }
 
 export async function setApiRateLimitedUntil(until: string | null) {
@@ -425,6 +458,26 @@ export async function removeExportReferences(exportId: string) {
         error: "Video deleted",
       };
     });
+    await writeInstagramJson(data);
+  }
+}
+
+/** Drop all Instagram records for an export (including published history). */
+export async function purgeExportFromInstagram(exportId: string) {
+  if (usesPostgresWrite()) {
+    try {
+      await purgeExportFromInstagramPg(exportId);
+    } catch (err) {
+      console.error("[instagram] postgres purge export failed", err);
+      if (!usesJsonWrite()) throw err;
+    }
+  }
+  if (usesJsonWrite()) {
+    const data = await readInstagramJson();
+    data.publishedExportIds = data.publishedExportIds.filter((id) => id !== exportId);
+    data.scheduledPosts = data.scheduledPosts.filter(
+      (post) => post.exportId !== exportId,
+    );
     await writeInstagramJson(data);
   }
 }

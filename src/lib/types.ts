@@ -234,6 +234,12 @@ export type InstagramAccount = {
   tokenExpiresAt?: string | null;
 };
 
+/** Per-account posting cadence — slot times are local HH:mm (24h). */
+export type AccountPostingGoal = {
+  postsPerDay: number;
+  slotTimes: string[];
+};
+
 export type ScheduledPostSource = "manual" | "queue" | "auto";
 
 export type ScheduledPostStatus =
@@ -273,6 +279,8 @@ export type InstagramData = {
   autoPostEnabled: boolean;
   /** Hours between auto-posts per account (4, 5, or 6) */
   autoPostIntervalHours: 4 | 5 | 6;
+  /** Per-account posting slot configuration */
+  accountPostingGoals?: Record<string, AccountPostingGoal>;
   /** Skip Instagram API calls until this time after a rate-limit error (ISO) */
   apiRateLimitedUntil?: string | null;
 };

@@ -185,6 +185,10 @@ export const instagramMeta = pgTable("instagram_meta", {
     .default({}),
   autoPostEnabled: boolean("auto_post_enabled").notNull().default(true),
   autoPostIntervalHours: integer("auto_post_interval_hours").notNull().default(5),
+  accountPostingGoals: jsonb("account_posting_goals")
+    .$type<Record<string, { postsPerDay: number; slotTimes: string[] }>>()
+    .notNull()
+    .default({}),
   apiRateLimitedUntil: timestamp("api_rate_limited_until", {
     withTimezone: true,
     mode: "string",

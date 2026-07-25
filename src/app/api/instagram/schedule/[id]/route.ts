@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { validateScheduleInstant } from "@/lib/calendar-utils";
 import {
   readInstagram,
   removeScheduledPost,
@@ -52,14 +53,11 @@ export async function PATCH(request: Request, { params }: Params) {
         { status: 400 },
       );
     }
-    if (
-      existing.status !== "published" &&
-      scheduledAt.getTime() < Date.now() - 60_000
-    ) {
-      return NextResponse.json(
-        { error: "Schedule time must be in the future." },
-        { status: 400 },
-      );
+    if (existing.status !== "published") {
+      const scheduleError = validateScheduleInstant(scheduledAt);
+      if (scheduleError) {
+        return NextResponse.json({ error: scheduleError }, { status: 400 });
+      }
     }
     patch.scheduledAt = scheduledAt.toISOString();
   }

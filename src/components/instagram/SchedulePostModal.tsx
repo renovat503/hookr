@@ -8,6 +8,9 @@ import {
   defaultScheduleTime,
   formatDateIso,
   formatTimeInputValue,
+  isPastDay,
+  minScheduleDateIso,
+  validateScheduleDateTime,
 } from "@/lib/calendar-utils";
 import type { LibraryExport, ScheduledPost } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -24,6 +27,7 @@ type SchedulePostModalProps = {
   activeAccountId: string;
   availableByAccount: Record<string, LibraryExport[]>;
   initialDate?: Date;
+  initialTime?: string;
   editingPost?: (ScheduledPost & { exportUrl?: string | null }) | null;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
@@ -36,6 +40,7 @@ export function SchedulePostModal({
   activeAccountId,
   availableByAccount,
   initialDate,
+  initialTime,
   editingPost,
   onClose,
   onSaved,
@@ -58,20 +63,24 @@ export function SchedulePostModal({
     setExportId(editingPost?.exportId ?? nextExports[0]?.id ?? "");
     setDateIso(
       formatDateIso(
-        initialDate ??
-          (editingPost
-            ? new Date(editingPost.scheduledAt)
-            : new Date()),
+        (() => {
+          const picked =
+            initialDate ??
+            (editingPost
+              ? new Date(editingPost.scheduledAt)
+              : new Date());
+          return isPastDay(picked) ? new Date() : picked;
+        })(),
       ),
     );
     setTime(
       editingPost
         ? formatTimeInputValue(editingPost.scheduledAt)
-        : defaultScheduleTime(),
+        : initialTime ?? defaultScheduleTime(),
     );
     setCaption(editingPost?.caption ?? "");
     setError(null);
-  }, [open, activeAccountId, editingPost, availableByAccount, initialDate]);
+  }, [open, activeAccountId, editingPost, availableByAccount, initialDate, initialTime]);
 
   useEffect(() => {
     if (!open || mode !== "create") return;
@@ -95,6 +104,11 @@ export function SchedulePostModal({
   const save = async () => {
     if (!accountId || !exportId) {
       setError("Pick an account and video.");
+      return;
+    }
+    const scheduleError = validateScheduleDateTime(dateIso, time);
+    if (scheduleError) {
+      setError(scheduleError);
       return;
     }
     setBusy(true);
@@ -270,6 +284,7 @@ export function SchedulePostModal({
                 <input
                   type="date"
                   value={dateIso}
+                  min={minScheduleDateIso()}
                   onChange={(e) => setDateIso(e.target.value)}
                   className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm"
                 />

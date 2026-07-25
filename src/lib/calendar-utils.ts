@@ -35,6 +35,41 @@ export function isToday(date: Date): boolean {
   return isSameDay(date, new Date());
 }
 
+export function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function isPastDay(date: Date): boolean {
+  return startOfDay(date).getTime() < startOfDay(new Date()).getTime();
+}
+
+/** Earliest allowed value for `<input type="date">`. */
+export function minScheduleDateIso(): string {
+  return formatDateIso(new Date());
+}
+
+export const SCHEDULE_MIN_LEAD_MS = 60_000;
+
+export function validateScheduleInstant(scheduledAt: Date): string | null {
+  if (Number.isNaN(scheduledAt.getTime())) {
+    return "Invalid schedule time.";
+  }
+  if (isPastDay(scheduledAt)) {
+    return "Cannot schedule on a past date.";
+  }
+  if (scheduledAt.getTime() < Date.now() + SCHEDULE_MIN_LEAD_MS) {
+    return "Schedule time must be in the future.";
+  }
+  return null;
+}
+
+export function validateScheduleDateTime(
+  dateIso: string,
+  time: string,
+): string | null {
+  return validateScheduleInstant(combineDateAndTime(dateIso, time));
+}
+
 export type CalendarDay = {
   date: Date;
   inMonth: boolean;
@@ -113,9 +148,11 @@ export function moveScheduledTimeToDate(
 }
 
 /** Pick a future datetime on a given day (for queue → calendar drops). */
-export function defaultScheduleDateTime(targetDate: Date): Date {
+export function defaultScheduleDateTime(targetDate: Date): Date | null {
+  if (isPastDay(targetDate)) return null;
+
   let result = combineDateAndTime(formatDateIso(targetDate), defaultScheduleTime());
-  const minTime = Date.now() + 60_000;
+  const minTime = Date.now() + SCHEDULE_MIN_LEAD_MS;
   if (result.getTime() >= minTime) return result;
 
   if (isSameDay(targetDate, new Date())) {
@@ -129,7 +166,8 @@ export function defaultScheduleDateTime(targetDate: Date): Date {
   } else {
     result = combineDateAndTime(formatDateIso(targetDate), "09:00");
   }
-  return result;
+
+  return validateScheduleInstant(result) ? null : result;
 }
 
 export const DRAG_POST_MIME = "application/x-hookr-post-id";
