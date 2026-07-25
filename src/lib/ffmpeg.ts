@@ -1,4 +1,4 @@
-import { access, mkdir, unlink, writeFile, copyFile } from "fs/promises";
+import { access, mkdir, unlink, writeFile, copyFile, stat } from "fs/promises";
 import { spawn } from "child_process";
 import os from "os";
 import path from "path";
@@ -908,6 +908,57 @@ export async function stripAudioFromVideo(options: {
     "+faststart",
     options.outputPath,
   ]);
+}
+
+/** Re-encode a demo clip until it fits under a storage upload limit. */
+export async function compressVideoForStorage(options: {
+  inputPath: string;
+  outputPath: string;
+  maxBytes: number;
+}): Promise<void> {
+  await mkdir(path.dirname(options.outputPath), { recursive: true });
+  const hasAudio = await hasAudioStream(options.inputPath);
+  const attempts = [
+    { height: 1080, crf: 28, audioKbps: 96 },
+    { height: 720, crf: 28, audioKbps: 96 },
+    { height: 720, crf: 32, audioKbps: 64 },
+    { height: 480, crf: 32, audioKbps: 64 },
+  ] as const;
+
+  for (const attempt of attempts) {
+    const h = evenDimension(attempt.height);
+    const scale = `scale=-2:${h}:force_original_aspect_ratio=decrease,setsar=1`;
+    await runFfmpeg([
+      "-i",
+      options.inputPath,
+      "-vf",
+      scale,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      String(attempt.crf),
+      ...(hasAudio
+        ? ["-c:a", "aac", "-b:a", `${attempt.audioKbps}k`]
+        : ["-an"]),
+      "-movflags",
+      "+faststart",
+      options.outputPath,
+    ]);
+
+    const { size } = await stat(options.outputPath);
+    if (size > 0 && size <= options.maxBytes) {
+      return;
+    }
+  }
+
+  const { size } = await stat(options.outputPath).catch(() => ({ size: 0 }));
+  throw new Error(
+    size > 0
+      ? `Could not compress video below ${Math.round(options.maxBytes / (1024 * 1024))} MB (still ${Math.round(size / (1024 * 1024))} MB). Trim the clip or upgrade Supabase storage limits.`
+      : "Could not compress video for upload.",
+  );
 }
 
 export function publicUrlToPath(publicUrl: string): string {

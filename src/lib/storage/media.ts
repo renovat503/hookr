@@ -18,6 +18,10 @@ import {
   usesSupabaseWrite,
 } from "@/lib/config/storage-mode";
 import { hookrTmpDir } from "@/lib/ffmpeg";
+import {
+  isSupabaseSizeLimitError,
+  supabaseSizeLimitMessage,
+} from "@/lib/storage/upload-limits";
 
 export function isRemoteMediaUrl(url: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
@@ -70,7 +74,11 @@ export async function uploadBufferToSupabase(options: {
     },
   );
   if (error) {
-    throw new Error(`Supabase upload failed: ${error.message}`);
+    const message = error.message || "Unknown Supabase upload error";
+    if (isSupabaseSizeLimitError(message)) {
+      throw new Error(supabaseSizeLimitMessage(options.buffer.length));
+    }
+    throw new Error(`Supabase upload failed: ${message}`);
   }
   return toPublicMediaUrl(key);
 }

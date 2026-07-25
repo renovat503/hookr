@@ -1,4 +1,5 @@
 import path from "path";
+import { readFile } from "fs/promises";
 import { NextResponse } from "next/server";
 import { addDemo, readLibrary, removeLibraryItem } from "@/lib/library-store";
 import { appendAssetToActiveCampaign } from "@/lib/sync-campaign-assets";
@@ -7,14 +8,69 @@ import {
   guessVideoContentType,
   saveMediaBuffer,
 } from "@/lib/storage/media";
+import {
+  getMaxUploadBytes,
+  isSupabaseSizeLimitError,
+  supabaseSizeLimitMessage,
+} from "@/lib/storage/upload-limits";
+import {
+  compressVideoForStorage,
+  hookrTmpDir,
+  safeUnlink,
+  writeTempBuffer,
+} from "@/lib/ffmpeg";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 function parseDuration(value: string | null): number {
   if (!value) return 0;
   const parsed = Math.round(Number(value));
   return Number.isFinite(parsed) ? Math.max(1, parsed) : 0;
+}
+
+async function prepareDemoBuffer(options: {
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
+}): Promise<{ buffer: Buffer; contentType: string; compressed: boolean }> {
+  const maxBytes = getMaxUploadBytes();
+  if (options.buffer.length <= maxBytes) {
+    return {
+      buffer: options.buffer,
+      contentType: options.contentType,
+      compressed: false,
+    };
+  }
+
+  const ext = path.extname(options.filename) || ".mp4";
+  const inputPath = await writeTempBuffer("demo-in", ext, options.buffer);
+  const outputPath = path.join(
+    hookrTmpDir(),
+    `demo-compressed-${Date.now()}.mp4`,
+  );
+
+  try {
+    await compressVideoForStorage({
+      inputPath,
+      outputPath,
+      maxBytes,
+    });
+    const buffer = await readFile(outputPath);
+    return {
+      buffer,
+      contentType: "video/mp4",
+      compressed: true,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not compress video.";
+    throw new Error(
+      `${message} Try a shorter clip, or raise the global upload limit in Supabase → Storage → Settings.`,
+    );
+  } finally {
+    await safeUnlink(inputPath);
+    await safeUnlink(outputPath);
+  }
 }
 
 async function saveDemoUpload(options: {
@@ -23,18 +79,19 @@ async function saveDemoUpload(options: {
   contentType: string;
   durationSeconds: number;
 }) {
-  const ext = path.extname(options.filename) || ".mp4";
+  const prepared = await prepareDemoBuffer(options);
   const id = `demo-${Date.now()}`;
-  const storageName = `${id}${ext}`;
+  const storageName = `${id}.mp4`;
   const url = await saveMediaBuffer({
     storageKey: `uploads/demos/${storageName}`,
-    buffer: options.buffer,
-    contentType: options.contentType || guessVideoContentType(storageName),
+    buffer: prepared.buffer,
+    contentType: prepared.contentType || guessVideoContentType(storageName),
   });
 
+  const baseName = options.filename.replace(/\.[^/.]+$/, "") || "Demo";
   const demo = await addDemo({
     id,
-    name: options.filename.replace(/\.[^/.]+$/, "") || "Demo",
+    name: prepared.compressed ? `${baseName} (compressed)` : baseName,
     url,
     durationSeconds: options.durationSeconds,
     uploadedAt: new Date().toISOString(),
@@ -134,10 +191,14 @@ export async function POST(request: Request) {
     return await handleRawUpload(request);
   } catch (err) {
     console.error("[library/demos]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed." },
-      { status: 500 },
-    );
+    const message = err instanceof Error ? err.message : "Upload failed.";
+    if (isSupabaseSizeLimitError(message)) {
+      return NextResponse.json(
+        { error: supabaseSizeLimitMessage(0) },
+        { status: 413 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

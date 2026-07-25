@@ -18,7 +18,7 @@ import { MediaPlayer, ReelPlayer } from "@/components/ui/ReelPlayer";
 import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
 import { hookCopyLabel } from "@/lib/campaign-hooks";
 import { cn, isCompleteHook, safeUploadFilename } from "@/lib/utils";
-import { uploadDemoClip } from "@/lib/upload-demo";
+import { uploadDemoClip, LARGE_DEMO_BYTES } from "@/lib/upload-demo";
 
 type Tab = "hooks" | "demos" | "music" | "motions" | "captions" | "exports";
 
@@ -103,6 +103,7 @@ export function MediaLibrary({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [demoUploadNote, setDemoUploadNote] = useState<string | null>(null);
   const [uploadingHook, setUploadingHook] = useState(false);
   const [uploadingMusic, setUploadingMusic] = useState(false);
   const [uploadingMotion, setUploadingMotion] = useState(false);
@@ -218,6 +219,11 @@ export function MediaLibrary({
 
     setUploading(true);
     setError(null);
+    setDemoUploadNote(
+      file.size > LARGE_DEMO_BYTES
+        ? "Large video — compressing on the server before upload…"
+        : null,
+    );
     try {
       const blobUrl = URL.createObjectURL(file);
       const durationSeconds = await readDuration(blobUrl);
@@ -233,6 +239,7 @@ export function MediaLibrary({
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
+      setDemoUploadNote(null);
     }
   };
 
@@ -633,6 +640,9 @@ export function MediaLibrary({
               onClick={() => fileRef.current?.click()}
             />
           </div>
+          {demoUploadNote ? (
+            <p className="text-sm text-muted">{demoUploadNote}</p>
+          ) : null}
 
           {data?.demos.length ? (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
