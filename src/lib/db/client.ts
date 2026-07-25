@@ -21,14 +21,14 @@ export function getDb() {
       process.env.DATABASE_SSL === "require" ||
       process.env.NODE_ENV === "production";
 
-    const poolMax = isSupabasePoolerUrl(url) ? 1 : 5;
+    const poolMax = isSupabasePoolerUrl(url) ? 2 : 5;
 
     client = postgres(url, {
       prepare: false,
       max: poolMax,
       connect_timeout: 10,
-      idle_timeout: 20,
-      max_lifetime: 60 * 5,
+      idle_timeout: 60,
+      max_lifetime: 60 * 30,
       ...(needsSsl ? { ssl: "require" as const } : {}),
     });
     db = drizzle(client, { schema });

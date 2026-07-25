@@ -13,7 +13,7 @@ export async function ensureInstagramMeta(): Promise<void> {
 
   try {
     await dbQuery(
-      (async () => {
+      async () => {
         await getDb().execute(sql`set lock_timeout = '5s'`);
         await getDb().execute(sql`set statement_timeout = '30s'`);
         await getDb().execute(sql`
@@ -43,7 +43,7 @@ export async function ensureInstagramMeta(): Promise<void> {
           alter table instagram_meta
           add column if not exists account_posting_goals jsonb not null default '{}'::jsonb
         `);
-      })(),
+      },
       "ensure instagram_meta",
       15_000,
     );

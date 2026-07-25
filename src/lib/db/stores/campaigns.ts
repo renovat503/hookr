@@ -37,10 +37,11 @@ function sanitizeBorrowedAssetIds(campaign: Campaign): Campaign {
 
 export async function readCampaignsPg(): Promise<CampaignsData> {
   const rows = await dbQuery(
-    getDb()
-      .select()
-      .from(campaignsTable)
-      .orderBy(desc(campaignsTable.createdAt)),
+    () =>
+      getDb()
+        .select()
+        .from(campaignsTable)
+        .orderBy(desc(campaignsTable.createdAt)),
     "read campaigns",
   );
   return {

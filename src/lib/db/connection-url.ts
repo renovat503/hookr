@@ -95,5 +95,15 @@ export function formatPgError(err: unknown): string {
     current = current.cause;
     depth += 1;
   }
-  return parts.join(" | ");
+  const raw = parts.join(" | ");
+  if (/connection_ended|connection terminated|econnreset|connection closed/i.test(raw)) {
+    return "Database connection dropped. Please refresh and try again.";
+  }
+  if (/timed out after/i.test(raw)) {
+    return "Database is slow right now. Please wait a moment and try again.";
+  }
+  if (raw.startsWith("Failed query:")) {
+    return "Database query failed. Please refresh and try again.";
+  }
+  return raw;
 }

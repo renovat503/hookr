@@ -213,34 +213,35 @@ async function patchMetaRow(
 export async function readInstagramPg(): Promise<InstagramData> {
   const db = getDb();
   const accounts = await dbQuery(
-    db.select().from(instagramAccountsTable),
+    () => db.select().from(instagramAccountsTable),
     "read instagram accounts",
   );
   const posts = await dbQuery(
-    db
-      .select()
-      .from(scheduledPostsTable)
-      .where(
-        and(
-          ne(scheduledPostsTable.source, "auto"),
-          or(
-            inArray(scheduledPostsTable.status, [
-              "scheduled",
-              "queued",
-              "publishing",
-              "failed",
-            ]),
-            and(
-              eq(scheduledPostsTable.status, "published"),
-              sql`${scheduledPostsTable.scheduledAt} >= now() - interval '90 days'`,
+    () =>
+      db
+        .select()
+        .from(scheduledPostsTable)
+        .where(
+          and(
+            ne(scheduledPostsTable.source, "auto"),
+            or(
+              inArray(scheduledPostsTable.status, [
+                "scheduled",
+                "queued",
+                "publishing",
+                "failed",
+              ]),
+              and(
+                eq(scheduledPostsTable.status, "published"),
+                sql`${scheduledPostsTable.scheduledAt} >= now() - interval '90 days'`,
+              ),
             ),
           ),
-        ),
-      )
-      .orderBy(desc(scheduledPostsTable.createdAt)),
+        )
+        .orderBy(desc(scheduledPostsTable.createdAt)),
     "read instagram scheduled posts",
   );
-  const meta = await dbQuery(ensureMetaRow(), "read instagram meta");
+  const meta = await dbQuery(() => ensureMetaRow(), "read instagram meta");
 
   return normalize({
     accounts: accounts.map(rowToAccount),
