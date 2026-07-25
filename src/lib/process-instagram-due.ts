@@ -150,7 +150,7 @@ export async function processInstagramDue(options?: {
       };
     }
 
-    const library = await readLibrary();
+    const library = await readLibrary("exports");
     const now = Date.now();
 
     const due = instagram.scheduledPosts.filter((post) => {

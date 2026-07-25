@@ -4,7 +4,7 @@ import {
   validateScheduleInstant,
 } from "@/lib/calendar-utils";
 import {
-  addScheduledPost,
+  addScheduledPosts,
   isExportPublishedOnAccount,
   readInstagram,
 } from "@/lib/instagram-store";
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const library = await readLibrary();
+    const library = await readLibrary("exports");
     const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
     const reserved = getReservedExportIdsForAccount(instagram, accountId);
     const occupied = getOccupiedSlotKeysInOffset(
@@ -148,10 +148,9 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       };
 
-      await addScheduledPost(post);
+      scheduled.push(post);
       reserved.add(exportId);
       occupied.add(key);
-      scheduled.push(post);
     }
 
     if (!scheduled.length) {
@@ -160,6 +159,8 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    await addScheduledPosts(scheduled);
 
     return NextResponse.json({ scheduled, skipped });
   } catch (err) {

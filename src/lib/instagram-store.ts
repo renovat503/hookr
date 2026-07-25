@@ -7,6 +7,7 @@ import {
 } from "@/lib/config/storage-mode";
 import {
   addScheduledPostPg,
+  addScheduledPostsPg,
   clearApiRateLimitIfExpiredPg,
   markExportPublishedPg,
   markExportPublishedOnAccountPg,
@@ -270,6 +271,22 @@ export async function addScheduledPost(post: ScheduledPost) {
   data.scheduledPosts.unshift(post);
   await syncInstagram(data);
   return post;
+}
+
+export async function addScheduledPosts(posts: ScheduledPost[]) {
+  if (!posts.length) return posts;
+  if (usesPostgresWrite()) {
+    try {
+      return await addScheduledPostsPg(posts);
+    } catch (err) {
+      console.error("[instagram] postgres bulk add schedule failed", err);
+      if (!usesJsonWrite()) throw err;
+    }
+  }
+  const data = await readInstagramJson();
+  data.scheduledPosts.unshift(...posts);
+  await syncInstagram(data);
+  return posts;
 }
 
 export async function updateScheduledPost(

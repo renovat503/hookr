@@ -380,6 +380,7 @@ export function InstagramScheduler() {
       const res = await fetch("/api/instagram/schedule/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(60_000),
         body: JSON.stringify({
           accountId: activeAccountId,
           assignments,

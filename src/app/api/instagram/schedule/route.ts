@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const library = await readLibrary();
+    const library = await readLibrary("exports");
     const exp = library.exports.find((e) => e.id === exportId);
     if (!exp) {
       return NextResponse.json(

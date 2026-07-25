@@ -373,6 +373,14 @@ export async function addScheduledPostPg(post: ScheduledPost) {
   return post;
 }
 
+export async function addScheduledPostsPg(posts: ScheduledPost[]) {
+  if (!posts.length) return posts;
+  await getDb()
+    .insert(scheduledPostsTable)
+    .values(posts.map(scheduledPostValues));
+  return posts;
+}
+
 export async function updateScheduledPostPg(
   id: string,
   patch: Partial<ScheduledPost>,

@@ -195,6 +195,7 @@ export async function readLibraryPgForExports(): Promise<LibraryData> {
   const exportRows = await db
     .select()
     .from(exportsTable)
+    .where(eq(exportsTable.status, "ready"))
     .orderBy(desc(exportsTable.createdAt));
 
   return {
