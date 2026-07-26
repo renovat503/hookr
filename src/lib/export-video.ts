@@ -1,4 +1,4 @@
-import { appendFile, access, writeFile, mkdir } from "fs/promises";
+import { appendFile, access, writeFile, mkdir, stat } from "fs/promises";
 import { constants as fsConstants } from "fs";
 import path from "path";
 import {
@@ -98,6 +98,7 @@ export async function exportLibraryVideo(
   let overlaidTemp: string | null = null;
   let concatTemp: string | null = null;
   let mixedTemp: string | null = null;
+  let exportPath: string | null = null;
 
   try {
     const library = await readLibrary("produce");
@@ -160,19 +161,19 @@ export async function exportLibraryVideo(
     const seqLabel = String(seq).padStart(3, "0");
     const slug = slugifyCaption(displayCaptionText || demoName || "video");
 
-    let exportDir = path.join(process.cwd(), "public", "exports");
+    let exportDir = hookrTmpDir();
     let publicUrlPath = `/exports/${id}.mp4`;
     let filename = `${id}.mp4`;
 
     if (body.runFolder) {
       const safe = sanitizeRunFolder(body.runFolder);
-      exportDir = path.join(exportDir, "runs", safe);
+      exportDir = path.join(hookrTmpDir(), "export-runs", safe);
       filename = `${seqLabel}-${slug}.mp4`;
       publicUrlPath = `/exports/runs/${safe}/${filename}`;
     }
 
     await mkdir(exportDir, { recursive: true });
-    const exportPath = path.join(exportDir, filename);
+    exportPath = path.join(exportDir, filename);
     concatTemp = path.join(hookrTmpDir(), `${id}-concat.mp4`);
     const variationSeed = Date.now();
     const variation = createExportVariation(variationSeed, Boolean(musicUrl));
@@ -318,6 +319,7 @@ export async function exportLibraryVideo(
     if (overlaidTemp) await safeUnlink(overlaidTemp);
     if (concatTemp) await safeUnlink(concatTemp);
     if (mixedTemp) await safeUnlink(mixedTemp);
+    if (exportPath) await safeUnlink(exportPath);
   }
 }
 

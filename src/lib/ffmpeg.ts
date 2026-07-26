@@ -346,15 +346,28 @@ async function prepareOverlayInput(inputPath: string): Promise<{
   path: string;
   cleanup: boolean;
 }> {
+  return prepareExportClipInput(inputPath);
+}
+
+/** Normalize heavy clips before export concat / re-encode (Railway memory). */
+async function prepareExportClipInput(inputPath: string): Promise<{
+  path: string;
+  cleanup: boolean;
+}> {
+  const { size } = await stat(inputPath);
   const dims = await getVideoDimensions(inputPath).catch(() => DEFAULT_VERTICAL);
   const maxDim = Math.max(dims.width, dims.height);
-  if (maxDim <= CAPTION_FRAME.height + 64) {
+  const sizeThreshold =
+    process.env.NODE_ENV === "production" ? 8 * 1024 * 1024 : 16 * 1024 * 1024;
+  const dimThreshold = CAPTION_FRAME.height + 64;
+
+  if (size <= sizeThreshold && maxDim <= dimThreshold) {
     return { path: inputPath, cleanup: false };
   }
 
   const tmpDir = workTmpDir();
   await mkdir(tmpDir, { recursive: true });
-  const scaledPath = path.join(tmpDir, `overlay-in-${Date.now()}.mp4`);
+  const scaledPath = path.join(tmpDir, `export-in-${Date.now()}.mp4`);
 
   await runFfmpeg([
     ...lowMemoryFfmpegLeadIn(),
@@ -370,6 +383,22 @@ async function prepareOverlayInput(inputPath: string): Promise<{
   ]);
 
   return { path: scaledPath, cleanup: true };
+}
+
+function exportVideoEncodeArgs(crf = 22): string[] {
+  if (process.env.NODE_ENV === "production") {
+    return lowMemoryX264Args(crf);
+  }
+  return [
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    String(crf),
+    "-pix_fmt",
+    "yuv420p",
+  ];
 }
 
 function fitScalePadFilter(
@@ -723,7 +752,13 @@ export function createExportVariation(
     brightness: Number(randRange(rng, -0.03, 0.03).toFixed(4)),
     contrast: Number(randRange(rng, 0.97, 1.03).toFixed(4)),
     saturation: Number(randRange(rng, 0.97, 1.03).toFixed(4)),
-    crf: Math.round(randRange(rng, 19, 21)),
+    crf: Math.round(
+      randRange(
+        rng,
+        process.env.NODE_ENV === "production" ? 22 : 19,
+        process.env.NODE_ENV === "production" ? 24 : 21,
+      ),
+    ),
     ...(withMusic
       ? { musicStartOffsetSec: Number(randRange(rng, 0, 3).toFixed(2)) }
       : {}),
@@ -778,6 +813,7 @@ export async function uniqueifyExportVideo(options: {
       `atempo=${speed.toFixed(4)}[a]`,
     ].join(",");
     await runFfmpeg([
+      ...lowMemoryFfmpegLeadIn(),
       "-i",
       options.inputPath,
       "-filter_complex",
@@ -786,18 +822,11 @@ export async function uniqueifyExportVideo(options: {
       "[v]",
       "-map",
       "[a]",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      String(crf),
-      "-pix_fmt",
-      "yuv420p",
+      ...exportVideoEncodeArgs(crf),
       "-c:a",
       "aac",
       "-b:a",
-      "128k",
+      "96k",
       "-map_metadata",
       "-1",
       "-movflags",
@@ -808,20 +837,14 @@ export async function uniqueifyExportVideo(options: {
   }
 
   await runFfmpeg([
+    ...lowMemoryFfmpegLeadIn(),
     "-i",
     options.inputPath,
     "-filter_complex",
     videoFilter,
     "-map",
     "[v]",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    String(crf),
-    "-pix_fmt",
-    "yuv420p",
+    ...exportVideoEncodeArgs(crf),
     "-an",
     "-map_metadata",
     "-1",
@@ -919,82 +942,78 @@ export async function concatenateClips(options: {
   await assertValidVideoFile(options.hookPath, "Hook clip");
   await assertValidVideoFile(options.demoPath, "Demo clip");
 
-  const hookHasAudio = await hasAudioStream(options.hookPath);
-  const demoHasAudio = await hasAudioStream(options.demoPath);
-  const { width, height } = await getVideoDimensions(options.hookPath).catch(
-    () => DEFAULT_VERTICAL,
-  );
-  const w = evenDimension(width);
-  const h = evenDimension(height);
-  assertEncoderDimensions(w, h, "Hook clip");
-  const hookFit = `${reelCoverScaleCropFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
-  const demoFit = `${fitScalePadFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
+  const preparedHook = await prepareExportClipInput(options.hookPath);
+  const preparedDemo = await prepareExportClipInput(options.demoPath);
 
-  const v0 = `[0:v]${hookFit}[v0]`;
-  const v1 = `[1:v]${demoFit}[v1]`;
+  try {
+    const hookHasAudio = await hasAudioStream(preparedHook.path);
+    const demoHasAudio = await hasAudioStream(preparedDemo.path);
+    const { width, height } = await getVideoDimensions(preparedHook.path).catch(
+      () => DEFAULT_VERTICAL,
+    );
+    const w = evenDimension(width);
+    const h = evenDimension(height);
+    assertEncoderDimensions(w, h, "Hook clip");
+    const hookFit = `${reelCoverScaleCropFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
+    const demoFit = `${fitScalePadFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
 
-  if (hookHasAudio && demoHasAudio) {
-    const filter = [
-      v0,
-      v1,
-      "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a0]",
-      "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a1]",
-      "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]",
-    ].join(";");
+    const v0 = `[0:v]${hookFit}[v0]`;
+    const v1 = `[1:v]${demoFit}[v1]`;
 
+    if (hookHasAudio && demoHasAudio) {
+      const filter = [
+        v0,
+        v1,
+        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a0]",
+        "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a1]",
+        "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]",
+      ].join(";");
+
+      await runFfmpeg([
+        ...lowMemoryFfmpegLeadIn(),
+        "-i",
+        preparedHook.path,
+        "-i",
+        preparedDemo.path,
+        "-filter_complex",
+        filter,
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        ...exportVideoEncodeArgs(22),
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-movflags",
+        "+faststart",
+        options.outputPath,
+      ]);
+      return;
+    }
+
+    const filter = `${v0};${v1};[v0][v1]concat=n=2:v=1:a=0[v]`;
     await runFfmpeg([
+      ...lowMemoryFfmpegLeadIn(),
       "-i",
-      options.hookPath,
+      preparedHook.path,
       "-i",
-      options.demoPath,
+      preparedDemo.path,
       "-filter_complex",
       filter,
       "-map",
       "[v]",
-      "-map",
-      "[a]",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "20",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "128k",
+      ...exportVideoEncodeArgs(22),
+      "-an",
       "-movflags",
       "+faststart",
       options.outputPath,
     ]);
-    return;
+  } finally {
+    if (preparedHook.cleanup) await safeUnlink(preparedHook.path);
+    if (preparedDemo.cleanup) await safeUnlink(preparedDemo.path);
   }
-
-  const filter = `${v0};${v1};[v0][v1]concat=n=2:v=1:a=0[v]`;
-  await runFfmpeg([
-    "-i",
-    options.hookPath,
-    "-i",
-    options.demoPath,
-    "-filter_complex",
-    filter,
-    "-map",
-    "[v]",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-an",
-    "-movflags",
-    "+faststart",
-    options.outputPath,
-  ]);
 }
 
 export async function stripAudioFromVideo(options: {
