@@ -59,12 +59,11 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 /** Unique on-disk cache name — must not truncate URLs (Supabase paths share long prefixes). */
 function remoteMediaCacheName(url: string): string {
-  const ext = path.extname(new URL(url).pathname) || ".mp4";
   const storageKey = storageKeyFromUrl(url);
   if (storageKey) {
-    const safe = storageKey.replace(/[^a-zA-Z0-9._-]+/g, "_");
-    return `${safe}${ext}`;
+    return storageKey.replace(/[^a-zA-Z0-9._-]+/g, "_");
   }
+  const ext = path.extname(new URL(url).pathname) || ".mp4";
   return `${createHash("sha256").update(url).digest("hex")}${ext}`;
 }
 
