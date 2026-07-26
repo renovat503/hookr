@@ -176,8 +176,8 @@ const DEFAULT_VERTICAL = {
 
 /** Scale + center-crop to the reel caption canvas (9:16) without distortion. */
 export function reelCoverScaleCropFilter(
-  width = CAPTION_FRAME.width,
-  height = CAPTION_FRAME.height,
+  width: number = CAPTION_FRAME.width,
+  height: number = CAPTION_FRAME.height,
 ) {
   const w = evenDimension(width);
   const h = evenDimension(height);
@@ -209,9 +209,26 @@ export async function normalizeToReelFrame(options: {
   ]);
 }
 
-function evenDimension(value: number) {
-  const rounded = Math.max(2, Math.round(value));
+function evenDimension(value: number, fallback = CAPTION_FRAME.width) {
+  const base = Number.isFinite(value) && value > 0 ? value : fallback;
+  const rounded = Math.max(2, Math.round(base));
   return rounded % 2 === 0 ? rounded : rounded - 1;
+}
+
+function clampCropPx(crop: number, width: number, height: number) {
+  const maxCrop = Math.floor(Math.min(width, height) / 4) - 2;
+  return Math.max(0, Math.min(crop, maxCrop));
+}
+
+function assertEncoderDimensions(width: number, height: number, label: string) {
+  const w = evenDimension(width);
+  const h = evenDimension(height);
+  if (w < 64 || h < 64) {
+    throw new Error(
+      `${label} has invalid video size (${width}x${height}). Re-upload the clip or try a different hook/demo.`,
+    );
+  }
+  return { width: w, height: h };
 }
 
 function workTmpDir() {
@@ -276,7 +293,10 @@ function extractFfmpegError(stderr: string) {
     (line) =>
       !isLibx264Noise(line) &&
       (markers.some((marker) => line.includes(marker)) ||
-        /\berror\b/i.test(line)),
+        /\berror\b/i.test(line) ||
+        /incorrect parameters such as bit_rate, rate, width or height/i.test(
+          line,
+        )),
   );
   if (hits.length > 0) {
     return [...new Set(hits)].join("\n").slice(-1200);
@@ -284,6 +304,9 @@ function extractFfmpegError(stderr: string) {
   const useful = lines.filter((line) => !isLibx264Noise(line) && line.trim());
   if (useful.length > 0) {
     return useful.slice(-8).join("\n").slice(-1200);
+  }
+  if (/incorrect parameters such as bit_rate, rate, width or height/i.test(stderr)) {
+    return "Video encoding failed — clip dimensions may be invalid. Re-upload the hook or demo and try again.";
   }
   return (
     "Video encoding failed on the server (often out of memory). Try again or use a shorter clip."
@@ -418,6 +441,7 @@ export async function overlayPngOntoVideo(options: {
 
   const frameW = CAPTION_FRAME.width;
   const frameH = CAPTION_FRAME.height;
+  assertEncoderDimensions(frameW, frameH, "Caption frame");
   const preset = ffmpegPreset();
 
   try {
@@ -446,13 +470,14 @@ export async function overlayPngOntoVideo(options: {
       "20",
       "-pix_fmt",
       "yuv420p",
-      "-x264-params",
-      "threads=2:lookahead_threads=1",
+      "-pix_fmt",
+      "yuv420p",
       "-movflags",
       "+faststart",
       options.outputPath,
     ]);
     await assertReadableMedia(options.outputPath, "Output video");
+    await assertValidVideoFile(options.outputPath, "Output video");
   } finally {
     await safeUnlink(pngPath);
   }
@@ -654,6 +679,7 @@ export async function uniqueifyExportVideo(options: {
   variation: InternalExportVariation;
 }): Promise<void> {
   await mkdir(path.dirname(options.outputPath), { recursive: true });
+  await assertValidVideoFile(options.inputPath, "Export input");
 
   const duration = await getMediaDurationSeconds(options.inputPath);
   const dims = await getVideoDimensions(options.inputPath).catch(
@@ -661,20 +687,29 @@ export async function uniqueifyExportVideo(options: {
   );
   const outW = evenDimension(dims.width);
   const outH = evenDimension(dims.height);
-  const startSec = options.variation.trimStartMs / 1000;
-  const endSec = Math.max(
-    startSec + 0.5,
-    duration - options.variation.trimEndMs / 1000,
+  assertEncoderDimensions(outW, outH, "Export input");
+
+  const maxTrimSec = Math.max(0, duration - 0.25);
+  const startSec = Math.min(options.variation.trimStartMs / 1000, maxTrimSec * 0.5);
+  const endSec = Math.min(
+    duration,
+    Math.max(startSec + 0.25, duration - options.variation.trimEndMs / 1000),
   );
-  const speed = options.variation.speed;
-  const crop = options.variation.cropPx;
+  if (endSec - startSec < 0.2) {
+    throw new Error(
+      "Export clip is too short after trimming. Use a longer hook or demo.",
+    );
+  }
+
+  const speed = Math.min(1.05, Math.max(0.95, options.variation.speed));
+  const crop = clampCropPx(options.variation.cropPx, outW, outH);
   const { brightness, contrast, saturation, crf } = options.variation;
   const hasAudio = await hasAudioStream(options.inputPath);
 
   const videoFilter = [
     `[0:v]trim=start=${startSec.toFixed(3)}:end=${endSec.toFixed(3)},setpts=PTS-STARTPTS`,
     `setpts=PTS/${speed.toFixed(4)}`,
-    `crop=iw-${crop * 2}:ih-${crop * 2}:${crop}:${crop}`,
+    ...(crop > 0 ? [`crop=iw-${crop * 2}:ih-${crop * 2}:${crop}:${crop}`] : []),
     fitScalePadFilter(outW, outH),
     `eq=brightness=${brightness}:contrast=${contrast}:saturation=${saturation}`,
     "format=yuv420p[v]",
@@ -700,6 +735,8 @@ export async function uniqueifyExportVideo(options: {
       "veryfast",
       "-crf",
       String(crf),
+      "-pix_fmt",
+      "yuv420p",
       "-c:a",
       "aac",
       "-b:a",
@@ -726,6 +763,8 @@ export async function uniqueifyExportVideo(options: {
     "veryfast",
     "-crf",
     String(crf),
+    "-pix_fmt",
+    "yuv420p",
     "-an",
     "-map_metadata",
     "-1",
@@ -820,6 +859,9 @@ export async function concatenateClips(options: {
 }): Promise<void> {
   await mkdir(path.dirname(options.outputPath), { recursive: true });
 
+  await assertValidVideoFile(options.hookPath, "Hook clip");
+  await assertValidVideoFile(options.demoPath, "Demo clip");
+
   const hookHasAudio = await hasAudioStream(options.hookPath);
   const demoHasAudio = await hasAudioStream(options.demoPath);
   const { width, height } = await getVideoDimensions(options.hookPath).catch(
@@ -827,7 +869,8 @@ export async function concatenateClips(options: {
   );
   const w = evenDimension(width);
   const h = evenDimension(height);
-  const hookFit = "fps=30,format=yuv420p,setpts=PTS-STARTPTS";
+  assertEncoderDimensions(w, h, "Hook clip");
+  const hookFit = `${reelCoverScaleCropFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
   const demoFit = `${fitScalePadFilter(w, h)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`;
 
   const v0 = `[0:v]${hookFit}[v0]`;
@@ -859,6 +902,8 @@ export async function concatenateClips(options: {
       "veryfast",
       "-crf",
       "20",
+      "-pix_fmt",
+      "yuv420p",
       "-c:a",
       "aac",
       "-b:a",
@@ -886,6 +931,8 @@ export async function concatenateClips(options: {
     "veryfast",
     "-crf",
     "20",
+    "-pix_fmt",
+    "yuv420p",
     "-an",
     "-movflags",
     "+faststart",
