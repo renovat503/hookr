@@ -503,17 +503,26 @@ export async function overlayPngOntoVideo(options: {
 
   try {
     const hasAudio = await hasAudioStream(prepared.path);
+    const duration = await getMediaDurationSeconds(prepared.path);
+    const overlayDuration = (duration + 0.1).toFixed(3);
+
     await runFfmpeg([
       ...lowMemoryFfmpegLeadIn(),
       "-i",
       prepared.path,
+      "-loop",
+      "1",
+      "-framerate",
+      "30",
+      "-t",
+      overlayDuration,
       "-i",
       pngPath,
       "-filter_complex",
       [
         `[0:v]${reelCoverScaleCropFilter(frameW, frameH)},format=yuv420p[base]`,
         `[1:v]scale=${frameW}:${frameH},format=rgba[ov]`,
-        `[base][ov]overlay=0:0:eof_action=pass:repeatlast=1,format=yuv420p[outv]`,
+        `[base][ov]overlay=0:0:eof_action=repeat:repeatlast=1,format=yuv420p[outv]`,
       ].join(";"),
       "-map",
       "[outv]",
