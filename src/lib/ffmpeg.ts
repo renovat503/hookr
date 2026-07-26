@@ -320,6 +320,58 @@ function extractFfmpegError(stderr: string) {
 function ffmpegPreset() {
   return process.env.NODE_ENV === "production" ? "ultrafast" : "veryfast";
 }
+
+/** x264 flags that keep RAM usage low on small Railway containers. */
+function lowMemoryX264Args(crf = 23): string[] {
+  return [
+    "-c:v",
+    "libx264",
+    "-preset",
+    ffmpegPreset(),
+    "-crf",
+    String(crf),
+    "-pix_fmt",
+    "yuv420p",
+    "-x264-params",
+    "ref=1:bframes=0:rc-lookahead=0:sync-lookahead=0:threads=1",
+  ];
+}
+
+function lowMemoryFfmpegLeadIn(): string[] {
+  return ["-threads", "1", "-filter_threads", "1"];
+}
+
+/** Downscale oversized sources before overlay — avoids OOM on 4K+ clips. */
+async function prepareOverlayInput(inputPath: string): Promise<{
+  path: string;
+  cleanup: boolean;
+}> {
+  const dims = await getVideoDimensions(inputPath).catch(() => DEFAULT_VERTICAL);
+  const maxDim = Math.max(dims.width, dims.height);
+  if (maxDim <= CAPTION_FRAME.height + 64) {
+    return { path: inputPath, cleanup: false };
+  }
+
+  const tmpDir = workTmpDir();
+  await mkdir(tmpDir, { recursive: true });
+  const scaledPath = path.join(tmpDir, `overlay-in-${Date.now()}.mp4`);
+
+  await runFfmpeg([
+    ...lowMemoryFfmpegLeadIn(),
+    "-i",
+    inputPath,
+    "-vf",
+    `${reelCoverScaleCropFilter()},format=yuv420p`,
+    ...lowMemoryX264Args(24),
+    "-an",
+    "-movflags",
+    "+faststart",
+    scaledPath,
+  ]);
+
+  return { path: scaledPath, cleanup: true };
+}
+
 function fitScalePadFilter(
   width: number,
   height: number,
@@ -446,36 +498,27 @@ export async function overlayPngOntoVideo(options: {
   const frameW = CAPTION_FRAME.width;
   const frameH = CAPTION_FRAME.height;
   assertEncoderDimensions(frameW, frameH, "Caption frame");
-  const preset = ffmpegPreset();
+
+  const prepared = await prepareOverlayInput(options.inputPath);
 
   try {
-    const hasAudio = await hasAudioStream(options.inputPath);
+    const hasAudio = await hasAudioStream(prepared.path);
     await runFfmpeg([
-      "-threads",
-      "2",
+      ...lowMemoryFfmpegLeadIn(),
       "-i",
-      options.inputPath,
+      prepared.path,
       "-i",
       pngPath,
       "-filter_complex",
       [
         `[0:v]${reelCoverScaleCropFilter(frameW, frameH)},format=yuv420p[base]`,
-        `[1:v]format=rgba[ov]`,
+        `[1:v]scale=${frameW}:${frameH},format=rgba[ov]`,
         `[base][ov]overlay=0:0:eof_action=pass:repeatlast=1,format=yuv420p[outv]`,
       ].join(";"),
       "-map",
       "[outv]",
-      ...(hasAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "128k"] : ["-an"]),
-      "-c:v",
-      "libx264",
-      "-preset",
-      preset,
-      "-crf",
-      "20",
-      "-pix_fmt",
-      "yuv420p",
-      "-pix_fmt",
-      "yuv420p",
+      ...(hasAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "96k", "-ar", "44100"] : ["-an"]),
+      ...lowMemoryX264Args(22),
       "-movflags",
       "+faststart",
       options.outputPath,
@@ -484,6 +527,7 @@ export async function overlayPngOntoVideo(options: {
     await assertValidVideoFile(options.outputPath, "Output video");
   } finally {
     await safeUnlink(pngPath);
+    if (prepared.cleanup) await safeUnlink(prepared.path);
   }
 }
 

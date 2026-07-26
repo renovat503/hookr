@@ -11,7 +11,7 @@ import { resolveToLocalPath, saveMediaFromLocalPath } from "@/lib/storage/media"
 import type { CharacterSource, OverlayStyle } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Body = {
   motionId?: string;

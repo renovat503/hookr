@@ -11,7 +11,7 @@ import { saveMediaFromLocalPath } from "@/lib/storage/media";
 import type { OverlayStyle } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Body = {
   sourceHookId?: string;
