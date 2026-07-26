@@ -3,6 +3,7 @@ import { constants as fsConstants } from "fs";
 import path from "path";
 import {
   burnTextOverlay,
+  compressVideoForStorage,
   concatenateClips,
   createExportVariation,
   mixBackgroundMusic,
@@ -15,6 +16,7 @@ import {
   resolveToLocalPath,
   saveMediaFromLocalPath,
 } from "@/lib/storage/media";
+import { getMaxUploadBytes } from "@/lib/storage/upload-limits";
 import {
   exportComboErrorMessage,
   findExistingExportCombo,
@@ -99,6 +101,7 @@ export async function exportLibraryVideo(
   let concatTemp: string | null = null;
   let mixedTemp: string | null = null;
   let exportPath: string | null = null;
+  let compressedTemp: string | null = null;
 
   try {
     const library = await readLibrary("produce");
@@ -264,10 +267,23 @@ export async function exportLibraryVideo(
       variation,
     });
 
+    let uploadPath = exportPath;
+    const { size: exportBytes } = await stat(exportPath);
+    const maxUploadBytes = getMaxUploadBytes();
+    if (exportBytes > maxUploadBytes) {
+      compressedTemp = path.join(hookrTmpDir(), `${id}-upload.mp4`);
+      await compressVideoForStorage({
+        inputPath: exportPath,
+        outputPath: compressedTemp,
+        maxBytes: maxUploadBytes,
+      });
+      uploadPath = compressedTemp;
+    }
+
     const storageKey = publicUrlPath.replace(/^\/+/, "");
     const storedUrl = await saveMediaFromLocalPath({
       storageKey,
-      localPath: exportPath,
+      localPath: uploadPath,
       contentType: "video/mp4",
     });
 
@@ -319,6 +335,7 @@ export async function exportLibraryVideo(
     if (overlaidTemp) await safeUnlink(overlaidTemp);
     if (concatTemp) await safeUnlink(concatTemp);
     if (mixedTemp) await safeUnlink(mixedTemp);
+    if (compressedTemp) await safeUnlink(compressedTemp);
     if (exportPath) await safeUnlink(exportPath);
   }
 }
