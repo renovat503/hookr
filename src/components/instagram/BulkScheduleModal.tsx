@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { ReelPlayer } from "@/components/ui/ReelPlayer";
-import { buildQueueCaption } from "@/lib/instagram-queue";
+import { resolveScheduleCaption } from "@/lib/instagram-queue";
 import { formatSlotTimeLabel, type ScheduleSlot } from "@/lib/posting-slots";
 import type { LibraryExport } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,17 +23,24 @@ type BulkScheduleModalProps = {
   exports: LibraryExport[];
   previewSlots: ScheduleSlot[];
   onClose: () => void;
-  onConfirm: (assignments: BulkScheduleAssignment[]) => void | Promise<void>;
+  onConfirm: (
+    assignments: BulkScheduleAssignment[],
+    defaultCaption: string,
+  ) => void | Promise<void>;
 };
 
 function defaultCaptionStorageKey(accountId: string) {
   return `hookr-bulk-caption-${accountId}`;
 }
 
-function fallbackCaption(exp: LibraryExport, defaultCaption: string) {
-  const trimmed = defaultCaption.trim();
-  if (trimmed) return trimmed;
-  return buildQueueCaption(exp);
+function captionForExport(
+  exp: LibraryExport,
+  defaultCaption: string,
+  captions: Record<string, string>,
+  exportId: string,
+) {
+  if (exportId in captions) return captions[exportId] ?? "";
+  return resolveScheduleCaption(exp, null, defaultCaption);
 }
 
 export function BulkScheduleModal({
@@ -100,7 +107,9 @@ export function BulkScheduleModal({
       for (const exportId of selected) {
         if (onlyUncustomized && customized.has(exportId)) continue;
         const exp = exportById.get(exportId);
-        next[exportId] = exp ? fallbackCaption(exp, value) : value.trim();
+        next[exportId] = exp
+          ? resolveScheduleCaption(exp, null, value)
+          : value.trim();
       }
       return next;
     });
@@ -134,7 +143,7 @@ export function BulkScheduleModal({
       if (exp) {
         setCaptions((prev) => ({
           ...prev,
-          [exportId]: fallbackCaption(exp, defaultCaption),
+          [exportId]: resolveScheduleCaption(exp, null, defaultCaption),
         }));
       }
       return [...current, exportId];
@@ -149,7 +158,7 @@ export function BulkScheduleModal({
       Object.fromEntries(
         ids.map((id) => {
           const exp = exportById.get(id);
-          return [id, exp ? fallbackCaption(exp, defaultCaption) : ""];
+          return [id, exp ? resolveScheduleCaption(exp, null, defaultCaption) : ""];
         }),
       ),
     );
@@ -166,7 +175,7 @@ export function BulkScheduleModal({
     if (!exp) return;
     setCaptions((prev) => ({
       ...prev,
-      [exportId]: fallbackCaption(exp, defaultCaption),
+      [exportId]: resolveScheduleCaption(exp, null, defaultCaption),
     }));
     setCustomized((prev) => {
       const next = new Set(prev);
@@ -197,12 +206,16 @@ export function BulkScheduleModal({
             dateIso: slot.dateIso,
             time: slot.time,
             scheduledAt: slot.scheduledAt.toISOString(),
-            caption: captions[exportId]?.trim() || buildQueueCaption(exp),
+            caption: resolveScheduleCaption(
+              exp,
+              captions[exportId],
+              defaultCaption,
+            ),
           };
         })
         .filter((item): item is BulkScheduleAssignment => item !== null);
 
-      await onConfirm(assignments);
+      await onConfirm(assignments, defaultCaption);
       persistDefaultCaption(defaultCaption);
       setSelected([]);
       setCaptions({});
@@ -368,7 +381,12 @@ export function BulkScheduleModal({
                             ) : null}
                           </div>
                           <textarea
-                            value={captions[exp.id] ?? ""}
+                            value={captionForExport(
+                              exp,
+                              defaultCaption,
+                              captions,
+                              exp.id,
+                            )}
                             onChange={(e) =>
                               updateVideoCaption(exp.id, e.target.value)
                             }

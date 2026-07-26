@@ -7,11 +7,11 @@ import {
   updateScheduledPost,
 } from "@/lib/instagram-store";
 import {
-  buildQueueCaption,
   getAccountQueuePosts,
   getAvailableExportsForAccount,
   getReservedExportIdsForAccount,
   nextQueuePosition,
+  resolveScheduleCaption,
 } from "@/lib/instagram-queue";
 import { readLibrary } from "@/lib/library-store";
 import type { ScheduledPost } from "@/lib/types";
@@ -22,6 +22,7 @@ type QueueBody = {
   accountId?: string;
   exportId?: string;
   caption?: string;
+  defaultCaption?: string;
   orderedIds?: string[];
 };
 
@@ -121,7 +122,11 @@ export async function POST(request: Request) {
       accountId,
       exportId,
       exportName: exp.name,
-      caption: caption || buildQueueCaption(exp),
+      caption: resolveScheduleCaption(
+        exp,
+        caption,
+        body.defaultCaption?.trim(),
+      ),
       scheduledAt: new Date().toISOString(),
       status: "queued",
       source: "queue",

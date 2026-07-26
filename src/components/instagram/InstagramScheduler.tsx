@@ -374,7 +374,7 @@ export function InstagramScheduler() {
     time: string;
     scheduledAt: string;
     caption: string;
-  }>) => {
+  }>, defaultCaption?: string) => {
     if (!activeAccountId) return;
     setBusy(true);
     setError(null);
@@ -386,6 +386,7 @@ export function InstagramScheduler() {
         body: JSON.stringify({
           accountId: activeAccountId,
           assignments,
+          defaultCaption,
           timezoneOffsetMinutes: new Date().getTimezoneOffset(),
         }),
       });

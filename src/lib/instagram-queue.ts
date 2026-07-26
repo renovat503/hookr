@@ -104,6 +104,21 @@ export function buildQueueCaption(exp: LibraryExport): string {
   );
 }
 
+/** Instagram post caption — prefers explicit text, then account default, then export metadata. */
+export function resolveScheduleCaption(
+  exp: LibraryExport,
+  caption?: string | null,
+  defaultCaption?: string | null,
+): string {
+  const explicit = caption?.trim();
+  if (explicit) return explicit;
+
+  const accountDefault = defaultCaption?.trim();
+  if (accountDefault) return accountDefault;
+
+  return buildQueueCaption(exp);
+}
+
 export function nextQueuePosition(data: InstagramData, accountId: string): number {
   const queue = getAccountQueuePosts(data, accountId);
   if (!queue.length) return 0;

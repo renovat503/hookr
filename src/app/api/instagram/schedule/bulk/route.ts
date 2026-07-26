@@ -9,8 +9,8 @@ import {
   readInstagram,
 } from "@/lib/instagram-store";
 import {
-  buildQueueCaption,
   getReservedExportIdsForAccount,
+  resolveScheduleCaption,
 } from "@/lib/instagram-queue";
 import { readLibrary } from "@/lib/library-store";
 import {
@@ -35,6 +35,7 @@ type BulkBody = {
   accountId?: string;
   exportIds?: string[];
   assignments?: BulkAssignment[];
+  defaultCaption?: string;
   timezoneOffsetMinutes?: number;
 };
 
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as BulkBody;
     const accountId = body.accountId?.trim();
     const timezoneOffsetMinutes = body.timezoneOffsetMinutes ?? 0;
+    const defaultCaption = body.defaultCaption?.trim() ?? "";
 
     const assignments =
       body.assignments
@@ -143,7 +145,7 @@ export async function POST(request: Request) {
         accountId,
         exportId,
         exportName: exp.name,
-        caption: caption || buildQueueCaption(exp),
+        caption: resolveScheduleCaption(exp, caption, defaultCaption),
         scheduledAt,
         status: "scheduled",
         source: "manual",
