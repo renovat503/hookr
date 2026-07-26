@@ -2,8 +2,10 @@ import { describeMotionFromReferenceVideo } from "@/lib/gemini";
 import { addMotion } from "@/lib/library-store";
 import {
   guessVideoContentType,
-  saveMediaBuffer,
+  saveMediaFromLocalPath,
 } from "@/lib/storage/media";
+import { prepareVideoForStorage } from "@/lib/storage/prepare-video-upload";
+import { safeUnlink } from "@/lib/ffmpeg";
 import type { LibraryMotion } from "@/lib/types";
 
 async function analyzeMotionFromFile(
@@ -35,24 +37,40 @@ export async function saveMotionFromBuffer(options: {
   const storageKey = `uploads/motions/${filename}`;
   const contentType = guessVideoContentType(filename);
 
-  const url = await saveMediaBuffer({
-    storageKey,
+  const prepared = await prepareVideoForStorage({
     buffer: options.buffer,
+    filename,
     contentType,
   });
 
-  let actionPrompt = options.actionPrompt?.trim() ?? "";
-  if (!actionPrompt) {
-    actionPrompt = await analyzeMotionFromFile(options.buffer, contentType);
-  }
+  try {
+    const url = await saveMediaFromLocalPath({
+      storageKey,
+      localPath: prepared.localPath,
+      contentType: prepared.contentType || contentType,
+    });
 
-  return addMotion({
-    id,
-    name: options.name,
-    url,
-    actionPrompt,
-    durationSeconds: options.durationSeconds,
-    sourceHookId: options.sourceHookId ?? null,
-    uploadedAt: new Date().toISOString(),
-  });
+    let actionPrompt = options.actionPrompt?.trim() ?? "";
+    if (!actionPrompt) {
+      actionPrompt = await analyzeMotionFromFile(options.buffer, contentType);
+    }
+
+    const displayName = prepared.compressed
+      ? `${options.name} (compressed)`
+      : options.name;
+
+    return addMotion({
+      id,
+      name: displayName,
+      url,
+      actionPrompt,
+      durationSeconds: options.durationSeconds,
+      sourceHookId: options.sourceHookId ?? null,
+      uploadedAt: new Date().toISOString(),
+    });
+  } finally {
+    for (const filePath of prepared.cleanup) {
+      await safeUnlink(filePath);
+    }
+  }
 }

@@ -1,9 +1,8 @@
-import { mkdir, readFile, unlink, writeFile, stat } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile, stat, access } from "fs/promises";
 import { createWriteStream } from "fs";
 import { pipeline } from "stream/promises";
 import path from "path";
 import { constants as fsConstants } from "fs";
-import { access } from "fs/promises";
 import {
   getPublicMediaBaseUrl,
   getStorageBucket,
@@ -57,6 +56,43 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function verifySupabaseObject(storageKey: string): Promise<void> {
+  const key = storageKey.replace(/^\/+/, "");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(getStorageBucket()).download(key);
+  if (error || !data) {
+    throw new Error(
+      `Upload verification failed — file is missing in storage (${key}): ${error?.message ?? "not found"}`,
+    );
+  }
+  if (data.size < 1024) {
+    throw new Error(
+      `Upload verification failed — stored file is too small (${data.size} bytes): ${key}`,
+    );
+  }
+}
+
+async function downloadSupabaseObjectToPath(
+  storageKey: string,
+  destPath: string,
+): Promise<void> {
+  const key = storageKey.replace(/^\/+/, "");
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(getStorageBucket()).download(key);
+  if (error || !data) {
+    throw new Error(
+      `Media file not found in storage (${key}). It may have failed to upload — delete this item and re-upload the clip.`,
+    );
+  }
+  const buffer = Buffer.from(await data.arrayBuffer());
+  if (buffer.length < 1024) {
+    throw new Error(
+      `Media file in storage is too small (${buffer.length} bytes): ${key}`,
+    );
+  }
+  await writeFile(destPath, buffer);
+}
+
 export async function uploadBufferToSupabase(options: {
   storageKey: string;
   buffer: Buffer;
@@ -80,6 +116,7 @@ export async function uploadBufferToSupabase(options: {
     }
     throw new Error(`Supabase upload failed: ${message}`);
   }
+  await verifySupabaseObject(key);
   return toPublicMediaUrl(key);
 }
 
@@ -195,8 +232,30 @@ export async function resolveToLocalPath(url: string): Promise<string> {
       await unlink(cachedPath).catch(() => undefined);
     }
 
+    if (isSupabaseMediaUrl(url) && usesSupabaseRead()) {
+      const storageKey = storageKeyFromUrl(url);
+      if (storageKey) {
+        try {
+          await downloadSupabaseObjectToPath(storageKey, cachedPath);
+          return cachedPath;
+        } catch (adminErr) {
+          const message =
+            adminErr instanceof Error ? adminErr.message : String(adminErr);
+          if (!/not found|too small|missing/i.test(message)) {
+            throw adminErr instanceof Error ? adminErr : new Error(message);
+          }
+        }
+      }
+    }
+
     const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
     if (!res.ok) {
+      const storageKey = storageKeyFromUrl(url);
+      if (storageKey && (res.status === 400 || res.status === 404)) {
+        throw new Error(
+          `Media file not found in storage (${storageKey}). Delete this item in Library and re-upload the clip.`,
+        );
+      }
       throw new Error(`Could not download media (${res.status}): ${url}`);
     }
     if (!res.body) {

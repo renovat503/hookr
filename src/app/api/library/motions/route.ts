@@ -4,6 +4,10 @@ import { readLibrary, removeLibraryItem } from "@/lib/library-store";
 import { readAppSettings, updateAppSettings } from "@/lib/app-settings-store";
 import { resolveToLocalPath, deleteMedia, saveMediaFromLocalPath } from "@/lib/storage/media";
 import { saveMotionFromBuffer } from "@/lib/save-motion";
+import {
+  isSupabaseSizeLimitError,
+  supabaseSizeLimitMessage,
+} from "@/lib/storage/upload-limits";
 
 export const runtime = "nodejs";
 
@@ -88,10 +92,14 @@ export async function POST(request: Request) {
     return NextResponse.json(motion);
   } catch (err) {
     console.error("[library/motions]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed." },
-      { status: 500 },
-    );
+    const message = err instanceof Error ? err.message : "Upload failed.";
+    if (isSupabaseSizeLimitError(message)) {
+      return NextResponse.json(
+        { error: supabaseSizeLimitMessage(0) },
+        { status: 413 },
+      );
+    }
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

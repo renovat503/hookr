@@ -64,6 +64,32 @@ async function uploadKey(key, contentType = "video/mp4") {
   return toPublicUrl(key);
 }
 
+async function objectExists(key) {
+  const { data, error } = await supabase.storage.from(BUCKET).download(key);
+  return !error && data && data.size >= 1024;
+}
+
+async function auditTable(table, idCol, urlCol) {
+  const rows = await sql.unsafe(`select ${idCol} as id, ${urlCol} as url from ${table}`);
+  const missing = [];
+  for (const row of rows) {
+    if (!row.url?.startsWith("http")) continue;
+    const key = row.url.replace(`${PUBLIC_BASE}/`, "").replace(/^\/+/, "");
+    if (!(await objectExists(key))) {
+      missing.push({ id: row.id, key });
+    }
+  }
+  if (missing.length) {
+    console.warn(`${table}: ${missing.length} DB record(s) with missing storage file:`);
+    for (const item of missing) {
+      console.warn(`  ${item.id} → ${item.key}`);
+    }
+  } else {
+    console.log(`${table}: all remote URLs verified in storage`);
+  }
+  return missing;
+}
+
 async function rewriteTable(table, idCol, urlCol) {
   const rows = await sql.unsafe(`select ${idCol} as id, ${urlCol} as url from ${table}`);
   let updated = 0;
@@ -86,9 +112,18 @@ async function main() {
   await rewriteTable("music", "id", "url");
   await rewriteTable("hooks", "id", "url");
   await rewriteTable("hooks", "id", "raw_url");
+  await rewriteTable("motions", "id", "url");
   await rewriteTable("exports", "id", "url");
   await rewriteTable("exports", "id", "hook_url");
   await rewriteTable("exports", "id", "demo_url");
+
+  console.log("\nAuditing remote URLs against storage…");
+  await auditTable("demos", "id", "url");
+  await auditTable("music", "id", "url");
+  await auditTable("hooks", "id", "url");
+  await auditTable("hooks", "id", "raw_url");
+  await auditTable("motions", "id", "url");
+  await auditTable("exports", "id", "url");
   await sql.end();
 }
 
