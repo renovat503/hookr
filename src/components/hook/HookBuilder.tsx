@@ -130,6 +130,12 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
     null,
   );
   const selectingCaptionRef = useRef(false);
+  const overlayTextRef = useRef(value.overlayText);
+  const overlayStyleRef = useRef(value.overlayStyle);
+  const generatedMotionIdRef = useRef(value.generatedMotionId);
+  overlayTextRef.current = value.overlayText;
+  overlayStyleRef.current = value.overlayStyle;
+  generatedMotionIdRef.current = value.generatedMotionId;
   const [recentCharacters, setRecentCharacters] = useState<RecentCharacterRef[]>(
     [],
   );
@@ -234,6 +240,7 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
   const handleCaptionSelect = useCallback(
     (text: string, captionId?: string | null) => {
       selectingCaptionRef.current = true;
+      overlayTextRef.current = text;
       setSelectedLibraryCaptionId(captionId ?? null);
       setCaptionSaveNotice(null);
       patch({ overlayText: text });
@@ -418,13 +425,13 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
 
   const selectLibraryMotion = (motion: LibraryMotion) => {
     setRecentMotions(touchRecentMotion(motion.id));
+    generatedMotionIdRef.current = motion.id;
     patch({
       characterSource: "library",
       libraryHookId: null,
       generatedMotionId: motion.id,
       generatedHookId: null,
       actionPrompt: motion.actionPrompt,
-      overlayText: "",
       generatedClipUrl: motion.url,
       generatedRawClipUrl: motion.url,
       generatedOverlaySnapshot: null,
@@ -718,8 +725,12 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
   };
 
   const applyCaptionToGeneratedMotion = async () => {
-    if (!value.generatedMotionId || value.isGenerating) return;
-    if (!value.overlayText.trim()) {
+    const motionId = generatedMotionIdRef.current;
+    const overlayText = overlayTextRef.current.trim();
+    const overlayStyle = overlayStyleRef.current;
+
+    if (!motionId || value.isGenerating) return;
+    if (!overlayText) {
       patch({ generationError: "Add text overlay copy before applying caption." });
       return;
     }
@@ -727,17 +738,17 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
     patch({ isGenerating: true, generationError: null });
 
     try {
-      const overlayPngBase64 = await captureCaptionPng(
-        value.overlayText,
-        value.overlayStyle,
-      );
+      const overlayPngBase64 = await captureCaptionPng(overlayText, overlayStyle);
+      if (!overlayPngBase64) {
+        throw new Error("Could not render caption — refresh and try again.");
+      }
       const res = await fetch("/api/library/hooks/apply-overlay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          motionId: value.generatedMotionId,
-          overlayText: value.overlayText,
-          overlayStyle: value.overlayStyle,
+          motionId,
+          overlayText,
+          overlayStyle,
           overlayPngBase64,
           actionPrompt: value.actionPrompt,
           referenceMotionId,
@@ -758,9 +769,10 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
         isGenerating: false,
         generatedHookId: data.id,
         generatedClipUrl: data.url,
+        generatedRawClipUrl: null,
         generatedOverlaySnapshot: {
-          text: value.overlayText.trim(),
-          style: { ...value.overlayStyle },
+          text: overlayText,
+          style: { ...overlayStyle },
         },
         generationError: null,
       });
@@ -1802,6 +1814,7 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
                       setCaptionSaveNotice(null);
                     }
                     selectingCaptionRef.current = false;
+                    overlayTextRef.current = e.target.value;
                     patch({ overlayText: e.target.value });
                   }}
                   placeholder={
