@@ -1,5 +1,6 @@
 import { mkdir, readFile, unlink, writeFile, stat, access } from "fs/promises";
 import { createWriteStream } from "fs";
+import { createHash } from "crypto";
 import { pipeline } from "stream/promises";
 import path from "path";
 import { constants as fsConstants } from "fs";
@@ -54,6 +55,17 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Unique on-disk cache name — must not truncate URLs (Supabase paths share long prefixes). */
+function remoteMediaCacheName(url: string): string {
+  const ext = path.extname(new URL(url).pathname) || ".mp4";
+  const storageKey = storageKeyFromUrl(url);
+  if (storageKey) {
+    const safe = storageKey.replace(/[^a-zA-Z0-9._-]+/g, "_");
+    return `${safe}${ext}`;
+  }
+  return `${createHash("sha256").update(url).digest("hex")}${ext}`;
 }
 
 async function verifySupabaseObject(storageKey: string): Promise<void> {
@@ -220,8 +232,7 @@ export async function resolveToLocalPath(url: string): Promise<string> {
   if (isRemoteMediaUrl(url)) {
     const tmpDir = path.join(hookrTmpDir(), "media-cache");
     await mkdir(tmpDir, { recursive: true });
-    const ext = path.extname(new URL(url).pathname) || ".mp4";
-    const cacheName = `remote-${Buffer.from(url).toString("base64url").slice(0, 48)}${ext}`;
+    const cacheName = remoteMediaCacheName(url);
     const cachedPath = path.join(tmpDir, cacheName);
 
     if (await fileExists(cachedPath)) {

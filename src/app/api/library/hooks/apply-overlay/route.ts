@@ -99,8 +99,9 @@ export async function POST(request: Request) {
       });
 
       rawUrl = motion.url;
-      actionPrompt = body.actionPrompt?.trim() || motion.actionPrompt;
+      actionPrompt = motion.actionPrompt?.trim() || body.actionPrompt?.trim() || "";
       durationSeconds = motion.durationSeconds || 4;
+      referenceMotionId = motionId;
     } else {
       const hook = data.hooks.find((h) => h.id === hookId);
       if (!hook) {

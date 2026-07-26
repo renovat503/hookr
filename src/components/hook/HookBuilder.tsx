@@ -750,10 +750,6 @@ export function HookBuilder({ value, onChange, onContinue }: HookBuilderProps) {
           overlayText,
           overlayStyle,
           overlayPngBase64,
-          actionPrompt: value.actionPrompt,
-          referenceMotionId,
-          characterSource: value.characterSource,
-          characterPresetId: value.characterPresetId,
         }),
       });
       const data = (await res.json()) as {
