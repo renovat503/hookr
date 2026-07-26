@@ -299,7 +299,11 @@ function extractFfmpegError(stderr: string) {
         )),
   );
   if (hits.length > 0) {
-    return [...new Set(hits)].join("\n").slice(-1200);
+    const joined = [...new Set(hits)].join("\n").slice(-1200);
+    if (/incorrect parameters such as bit_rate, rate, width or height/i.test(joined)) {
+      return "Could not process this video — export it as H.264 MP4 (1080p or smaller) and try again.";
+    }
+    return joined;
   }
   const useful = lines.filter((line) => !isLibx264Noise(line) && line.trim());
   if (useful.length > 0) {
@@ -964,6 +968,7 @@ export async function compressVideoForStorage(options: {
   maxBytes: number;
 }): Promise<void> {
   await mkdir(path.dirname(options.outputPath), { recursive: true });
+  await assertValidVideoFile(options.inputPath, "Demo video");
   const { size: inputBytes } = await stat(options.inputPath);
   const hasAudio = await hasAudioStream(options.inputPath);
   const attempts =
@@ -982,36 +987,52 @@ export async function compressVideoForStorage(options: {
             { height: 480, crf: 32, audioKbps: 64 },
           ];
 
+  let lastError: unknown;
+
   for (const attempt of attempts) {
     const h = evenDimension(attempt.height);
-    const scale = `scale=-2:${h}:force_original_aspect_ratio=decrease,setsar=1`;
-    await runFfmpeg([
-      "-threads",
-      "1",
-      "-i",
-      options.inputPath,
-      "-vf",
-      scale,
-      "-c:v",
-      "libx264",
-      "-preset",
-      "ultrafast",
-      "-crf",
-      String(attempt.crf),
-      "-x264-params",
-      "ref=1:rc-lookahead=0:threads=1",
-      ...(hasAudio
-        ? ["-c:a", "aac", "-b:a", `${attempt.audioKbps}k`]
-        : ["-an"]),
-      "-movflags",
-      "+faststart",
-      options.outputPath,
-    ]);
+    const vf = [
+      `scale=-2:${h}:force_original_aspect_ratio=decrease`,
+      "format=yuv420p",
+      "setsar=1",
+    ].join(",");
+    try {
+      await runFfmpeg([
+        "-threads",
+        "1",
+        "-i",
+        options.inputPath,
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        String(attempt.crf),
+        "-pix_fmt",
+        "yuv420p",
+        ...(hasAudio
+          ? ["-c:a", "aac", "-b:a", `${attempt.audioKbps}k`, "-ar", "44100", "-ac", "2"]
+          : ["-an"]),
+        "-movflags",
+        "+faststart",
+        options.outputPath,
+      ]);
 
-    const { size } = await stat(options.outputPath);
-    if (size > 0 && size <= options.maxBytes) {
-      return;
+      const { size } = await stat(options.outputPath);
+      if (size > 0 && size <= options.maxBytes) {
+        await assertValidVideoFile(options.outputPath, "Compressed demo");
+        return;
+      }
+    } catch (err) {
+      lastError = err;
+      await safeUnlink(options.outputPath);
     }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
   }
 
   const { size } = await stat(options.outputPath).catch(() => ({ size: 0 }));

@@ -255,7 +255,7 @@ export function MediaLibrary({
       await load();
       setTab("demos");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(friendlyFetchError(err, "Upload failed."));
     } finally {
       setUploading(false);
       setDemoUploadNote(null);

@@ -21,12 +21,18 @@ export function isCompleteHook(hook: LibraryHook): boolean {
 export function friendlyFetchError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const msg = err.message.toLowerCase();
-  if (
-    msg.includes("signal timed out") ||
+  if (msg.includes("signal timed out") ||
     msg.includes("timed out") ||
     msg.includes("abort")
   ) {
     return "Request timed out. The database may be busy — wait a moment and retry.";
+  }
+  if (
+    msg.includes("incorrect parameters") ||
+    msg.includes("libx264") ||
+    msg.includes("error code:")
+  ) {
+    return "Video processing failed. Try re-exporting the clip as H.264 MP4 (1080p or smaller).";
   }
   return err.message || fallback;
 }
