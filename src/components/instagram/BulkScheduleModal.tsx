@@ -14,6 +14,7 @@ export type BulkScheduleAssignment = {
   time: string;
   scheduledAt: string;
   caption: string;
+  timezoneOffsetMinutes: number;
 };
 
 type BulkScheduleModalProps = {
@@ -206,6 +207,7 @@ export function BulkScheduleModal({
             dateIso: slot.dateIso,
             time: slot.time,
             scheduledAt: slot.scheduledAt.toISOString(),
+            timezoneOffsetMinutes: slot.timezoneOffsetMinutes,
             caption: resolveScheduleCaption(
               exp,
               captions[exportId],

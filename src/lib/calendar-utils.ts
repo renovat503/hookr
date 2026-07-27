@@ -114,10 +114,29 @@ export function formatTimeInputValue(iso: string): string {
 }
 
 export function combineDateAndTime(dateIso: string, time: string): Date {
-  const [hours, minutes] = time.split(":").map((part) => Number(part));
-  const date = new Date(`${dateIso}T00:00:00`);
-  date.setHours(hours, minutes ?? 0, 0, 0);
-  return date;
+  return instantFromLocalParts(dateIso, time, new Date().getTimezoneOffset());
+}
+
+/** Build a UTC instant from local calendar date, clock time, and JS timezone offset. */
+export function instantFromLocalParts(
+  dateIso: string,
+  time: string,
+  timezoneOffsetMinutes: number,
+): Date {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  const [hours, minutes] = time.split(":").map(Number);
+  return new Date(
+    Date.UTC(year, month - 1, day, hours, minutes ?? 0, 0, 0) +
+      timezoneOffsetMinutes * 60_000,
+  );
+}
+
+export function isoFromLocalParts(
+  dateIso: string,
+  time: string,
+  timezoneOffsetMinutes: number,
+): string {
+  return instantFromLocalParts(dateIso, time, timezoneOffsetMinutes).toISOString();
 }
 
 /** Same as Date.getTimezoneOffset() from the browser (minutes west of UTC). */

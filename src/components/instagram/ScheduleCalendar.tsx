@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import {
   addMonths,
-  combineDateAndTime,
   DRAG_POST_MIME,
   DRAG_QUEUE_MIME,
   formatMonthYear,
@@ -21,10 +20,10 @@ import {
 } from "@/lib/calendar-utils";
 import {
   findPostForSlot,
+  buildScheduleSlot,
   formatSlotTimeLabel,
   isSlotAvailable,
   isSlotPast,
-  slotKey,
   type ScheduleSlot,
 } from "@/lib/posting-slots";
 import type { ScheduledPost, ScheduledPostStatus } from "@/lib/types";
@@ -258,13 +257,7 @@ export function ScheduleCalendar({
                   const post = findPostForSlot(posts, accountId, day.iso, time);
                   const slotPast = isSlotPast(day.iso, time);
                   const available = isSlotAvailable(day.iso, time, occupied);
-                  const slot: ScheduleSlot = {
-                    date: day.date,
-                    dateIso: day.iso,
-                    time,
-                    scheduledAt: combineDateAndTime(day.iso, time),
-                    key: slotKey(day.iso, time),
-                  };
+                  const slot = buildScheduleSlot(day.date, day.iso, time);
 
                   if (post) {
                     const draggable = canDragPost(post);
@@ -343,15 +336,17 @@ export function ScheduleCalendar({
 
                 {orphanPosts.map((post) => {
                   const draggable = canDragPost(post);
+                  const timezoneOffsetMinutes = new Date().getTimezoneOffset();
                   const parts = getSchedulePartsInOffset(
                     post.scheduledAt,
-                    new Date().getTimezoneOffset(),
+                    timezoneOffsetMinutes,
                   );
                   const slot: ScheduleSlot = {
                     date: day.date,
                     dateIso: day.iso,
                     time: parts.time,
                     scheduledAt: new Date(post.scheduledAt),
+                    timezoneOffsetMinutes,
                     key: `${post.id}-orphan`,
                   };
 

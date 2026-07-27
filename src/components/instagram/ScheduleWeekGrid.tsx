@@ -1,15 +1,15 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { formatDateIso, isToday, combineDateAndTime } from "@/lib/calendar-utils";
+import { formatDateIso, isToday } from "@/lib/calendar-utils";
 import {
   addWeeks,
+  buildScheduleSlot,
   findPostForSlot,
   formatSlotTimeLabel,
   getWeekDays,
   isSlotAvailable,
   isSlotPast,
-  slotKey,
   type ScheduleSlot,
 } from "@/lib/posting-slots";
 import type { ScheduledPost } from "@/lib/types";
@@ -102,13 +102,7 @@ export function ScheduleWeekGrid({
                   const post = findPostForSlot(posts, accountId, dateIso, time);
                   const past = isSlotPast(dateIso, time);
                   const available = isSlotAvailable(dateIso, time, occupied);
-                  const slot: ScheduleSlot = {
-                    date: day,
-                    dateIso,
-                    time,
-                    scheduledAt: combineDateAndTime(dateIso, time),
-                    key: slotKey(dateIso, time),
-                  };
+                  const slot = buildScheduleSlot(day, dateIso, time);
 
                   if (post) {
                     return (

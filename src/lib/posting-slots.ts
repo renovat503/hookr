@@ -3,6 +3,7 @@ import {
   formatDateIso,
   formatTimeInputValue,
   getSchedulePartsInOffset,
+  instantFromLocalParts,
   isPastDay,
   startOfDay,
   validateScheduleInstant,
@@ -28,6 +29,7 @@ export type ScheduleSlot = {
   dateIso: string;
   time: string;
   scheduledAt: Date;
+  timezoneOffsetMinutes: number;
   key: string;
 };
 
@@ -71,6 +73,22 @@ export function getPostingGoalForAccount(
 
 export function slotKey(dateIso: string, time: string): string {
   return `${dateIso}@${time}`;
+}
+
+export function buildScheduleSlot(
+  date: Date,
+  dateIso: string,
+  time: string,
+): ScheduleSlot {
+  const timezoneOffsetMinutes = new Date().getTimezoneOffset();
+  return {
+    date,
+    dateIso,
+    time,
+    scheduledAt: instantFromLocalParts(dateIso, time, timezoneOffsetMinutes),
+    timezoneOffsetMinutes,
+    key: slotKey(dateIso, time),
+  };
 }
 
 export function formatSlotTimeLabel(time: string): string {
@@ -195,6 +213,7 @@ export function getNextAvailableSlots(
   const reserved = new Set(occupied);
   const slots: ScheduleSlot[] = [];
   const start = startOfDay(fromDate);
+  const timezoneOffsetMinutes = new Date().getTimezoneOffset();
 
   for (let dayOffset = 0; dayOffset < maxDays && slots.length < count; dayOffset++) {
     const date = new Date(start);
@@ -204,9 +223,20 @@ export function getNextAvailableSlots(
     for (const time of sortedTimes) {
       const key = slotKey(dateIso, time);
       if (reserved.has(key)) continue;
-      const scheduledAt = combineDateAndTime(dateIso, time);
+      const scheduledAt = instantFromLocalParts(
+        dateIso,
+        time,
+        timezoneOffsetMinutes,
+      );
       if (validateScheduleInstant(scheduledAt)) continue;
-      slots.push({ date, dateIso, time, scheduledAt, key });
+      slots.push({
+        date,
+        dateIso,
+        time,
+        scheduledAt,
+        timezoneOffsetMinutes,
+        key,
+      });
       reserved.add(key);
       if (slots.length >= count) break;
     }

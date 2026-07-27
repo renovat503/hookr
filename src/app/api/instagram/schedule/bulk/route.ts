@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  schedulePartsMatchAssignment,
+  getSchedulePartsInOffset,
   validateScheduleInstant,
 } from "@/lib/calendar-utils";
 import {
@@ -30,6 +30,7 @@ type BulkAssignment = {
   time?: string;
   scheduledAt?: string;
   caption?: string;
+  timezoneOffsetMinutes?: number;
 };
 
 type BulkBody = {
@@ -40,11 +41,27 @@ type BulkBody = {
   timezoneOffsetMinutes?: number;
 };
 
+function resolveTimezoneOffsetMinutes(
+  assignment: BulkAssignment,
+  fallback?: number,
+): number {
+  if (typeof assignment.timezoneOffsetMinutes === "number") {
+    return assignment.timezoneOffsetMinutes;
+  }
+  if (typeof fallback === "number") {
+    return fallback;
+  }
+  return 0;
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as BulkBody;
     const accountId = body.accountId?.trim();
-    const timezoneOffsetMinutes = body.timezoneOffsetMinutes ?? 0;
+    const requestTimezoneOffsetMinutes =
+      typeof body.timezoneOffsetMinutes === "number"
+        ? body.timezoneOffsetMinutes
+        : undefined;
     const defaultCaption = body.defaultCaption?.trim() ?? "";
 
     const assignments =
@@ -55,6 +72,7 @@ export async function POST(request: Request) {
           time: item.time?.trim() ?? "",
           scheduledAt: item.scheduledAt?.trim() ?? "",
           caption: item.caption?.trim() ?? "",
+          timezoneOffsetMinutes: item.timezoneOffsetMinutes,
         }))
         .filter(
           (item) =>
@@ -89,16 +107,24 @@ export async function POST(request: Request) {
       instagram.scheduledPosts,
       accountId,
       goal.slotTimes,
-      timezoneOffsetMinutes,
+      requestTimezoneOffsetMinutes ?? 0,
     );
 
     const scheduled: ScheduledPost[] = [];
     const skipped: Array<{ exportId: string; reason: string }> = [];
 
     for (const assignment of assignments) {
-      const { exportId, dateIso, time, scheduledAt, caption } = assignment;
+      const { exportId, scheduledAt, caption } = assignment;
+      const timezoneOffsetMinutes = resolveTimezoneOffsetMinutes(
+        assignment,
+        requestTimezoneOffsetMinutes,
+      );
+      const slotParts = getSchedulePartsInOffset(
+        scheduledAt,
+        timezoneOffsetMinutes,
+      );
 
-      if (!allowedTimes.has(time)) {
+      if (!allowedTimes.has(slotParts.time)) {
         skipped.push({ exportId, reason: "Time is not a posting goal slot." });
         continue;
       }
@@ -109,19 +135,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      if (
-        !schedulePartsMatchAssignment(
-          scheduledAt,
-          dateIso,
-          time,
-          timezoneOffsetMinutes,
-        )
-      ) {
-        skipped.push({ exportId, reason: "Slot time does not match schedule." });
-        continue;
-      }
-
-      const key = slotKey(dateIso, time);
+      const key = slotKey(slotParts.dateIso, slotParts.time);
       if (occupied.has(key)) {
         skipped.push({ exportId, reason: "Slot is already taken." });
         continue;
