@@ -473,7 +473,7 @@ export function MediaLibrary({
     setError(null);
 
     try {
-      const result = await downloadMediaBulk(
+      await downloadMediaBulk(
         selected.map((exp) => ({
           url: exp.url,
           filename: exportDownloadFilename(exp),
@@ -482,29 +482,10 @@ export function MediaLibrary({
       );
 
       for (const exp of selected) {
-        if (!result.failed.includes(exportDownloadFilename(exp))) {
-          markExportDownloaded(exp.id);
-        }
+        markExportDownloaded(exp.id);
       }
       setDownloadedExportIds(getDownloadedExportIds());
-
-      if (result.failed.length) {
-        setError(
-          `Downloaded ${result.downloaded} of ${selected.length}. Failed: ${result.failed.slice(0, 3).join(", ")}${result.failed.length > 3 ? "…" : ""}`,
-        );
-      }
-
-      if (result.downloaded > 0) {
-        setSelectedExportIds((current) =>
-          current.filter((id) =>
-            selected.some(
-              (exp) =>
-                exp.id === id &&
-                result.failed.includes(exportDownloadFilename(exp)),
-            ),
-          ),
-        );
-      }
+      setSelectedExportIds([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk download failed.");
     } finally {
@@ -1039,8 +1020,9 @@ export function MediaLibrary({
               </div>
               {bulkDownloadProgress ? (
                 <p className="text-xs text-muted">
-                  Downloading {bulkDownloadProgress.current} of{" "}
-                  {bulkDownloadProgress.total}: {bulkDownloadProgress.filename}
+                  {bulkDownloadProgress.phase === "packaging"
+                    ? `Packaging ${bulkDownloadProgress.total} videos into ${bulkDownloadProgress.folderName}…`
+                    : `Downloading ${bulkDownloadProgress.folderName}.zip…`}
                 </p>
               ) : null}
               <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

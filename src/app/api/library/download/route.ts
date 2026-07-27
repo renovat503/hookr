@@ -4,35 +4,13 @@ import path from "path";
 import { Readable } from "stream";
 import { NextResponse } from "next/server";
 import {
-  isRemoteMediaUrl,
-  resolveToLocalPath,
-} from "@/lib/storage/media";
-import { isSupabaseMediaUrl, storageKeyFromUrl } from "@/lib/storage/supabase";
+  isAllowedDownloadUrl,
+  sanitizeDownloadFilename,
+} from "@/lib/download-allowlist";
+import { resolveToLocalPath } from "@/lib/storage/media";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const ALLOWED_PATH_PREFIXES = [
-  "/exports/",
-  "/generated/",
-  "/uploads/demos/",
-  "/uploads/hooks/",
-  "/uploads/motions/",
-  "/uploads/music/",
-  "/uploads/characters/",
-  "/characters/",
-];
-
-const ALLOWED_STORAGE_PREFIXES = [
-  "exports/",
-  "generated/",
-  "uploads/demos/",
-  "uploads/hooks/",
-  "uploads/motions/",
-  "uploads/music/",
-  "uploads/characters/",
-  "characters/",
-];
 
 function contentTypeFor(filename: string) {
   const ext = path.extname(filename).toLowerCase();
@@ -50,23 +28,6 @@ function contentTypeFor(filename: string) {
     default:
       return "application/octet-stream";
   }
-}
-
-function sanitizeFilename(name: string) {
-  const base = path.basename(name).replace(/[^\w.\-()+ ]/g, "_").trim();
-  return base.length > 0 ? base : "download";
-}
-
-function isAllowedMediaUrl(mediaUrl: string): boolean {
-  if (ALLOWED_PATH_PREFIXES.some((prefix) => mediaUrl.startsWith(prefix))) {
-    return true;
-  }
-  if (!isRemoteMediaUrl(mediaUrl) || !isSupabaseMediaUrl(mediaUrl)) {
-    return false;
-  }
-  const key = storageKeyFromUrl(mediaUrl);
-  if (!key) return false;
-  return ALLOWED_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function downloadBufferResponse(body: Buffer, filename: string) {
@@ -97,11 +58,11 @@ export async function GET(request: Request) {
   const mediaUrl = searchParams.get("url")?.trim();
   const requestedName = searchParams.get("filename")?.trim();
 
-  if (!mediaUrl || !isAllowedMediaUrl(mediaUrl)) {
+  if (!mediaUrl || !isAllowedDownloadUrl(mediaUrl)) {
     return NextResponse.json({ error: "Invalid download url." }, { status: 400 });
   }
 
-  const filename = sanitizeFilename(
+  const filename = sanitizeDownloadFilename(
     requestedName ??
       path.basename(new URL(mediaUrl, "http://local").pathname) ??
       "download",
