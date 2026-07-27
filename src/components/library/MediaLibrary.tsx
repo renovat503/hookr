@@ -22,7 +22,7 @@ import {
   type BulkDownloadProgress,
 } from "@/lib/download-media";
 import {
-  getDownloadedExportIds,
+  getDownloadCounts,
   markExportDownloaded,
 } from "@/lib/downloaded-exports";
 import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
@@ -31,6 +31,8 @@ import { cn, friendlyFetchError, isCompleteHook, safeUploadFilename } from "@/li
 import { uploadDemoClip, LARGE_DEMO_BYTES } from "@/lib/upload-demo";
 
 type Tab = "hooks" | "demos" | "music" | "motions" | "captions" | "exports";
+
+const EXPORT_BATCH_SIZES = [60, 120, 180] as const;
 
 const TABS: { id: Tab; label: string; icon: typeof Sparkles }[] = [
   { id: "hooks", label: "Hooks", icon: Sparkles },
@@ -127,8 +129,8 @@ export function MediaLibrary({
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const [bulkDownloadProgress, setBulkDownloadProgress] =
     useState<BulkDownloadProgress | null>(null);
-  const [downloadedExportIds, setDownloadedExportIds] = useState<Set<string>>(
-    () => new Set(),
+  const [downloadCounts, setDownloadCounts] = useState<Record<string, number>>(
+    () => ({}),
   );
   const [savingMotionHookId, setSavingMotionHookId] = useState<string | null>(
     null,
@@ -140,7 +142,7 @@ export function MediaLibrary({
   const motionFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setDownloadedExportIds(getDownloadedExportIds());
+    setDownloadCounts(getDownloadCounts());
   }, []);
 
   useEffect(() => {
@@ -464,9 +466,12 @@ export function MediaLibrary({
     setSelectedExportIds([]);
   };
 
-  const downloadSelectedExports = async () => {
-    const selected = exports.filter((exp) => selectedExportIds.includes(exp.id));
-    if (!selected.length) return;
+  const selectFirstExports = (count: number) => {
+    setSelectedExportIds(exports.slice(0, count).map((exp) => exp.id));
+  };
+
+  const downloadExports = async (batch: LibraryExport[]) => {
+    if (!batch.length) return;
 
     setBulkDownloading(true);
     setBulkDownloadProgress(null);
@@ -474,7 +479,7 @@ export function MediaLibrary({
 
     try {
       await downloadMediaBulk(
-        selected.map((exp) => ({
+        batch.map((exp) => ({
           id: exp.id,
           url: exp.url,
           filename: exportDownloadFilename(exp),
@@ -482,10 +487,10 @@ export function MediaLibrary({
         { onProgress: setBulkDownloadProgress },
       );
 
-      for (const exp of selected) {
+      for (const exp of batch) {
         markExportDownloaded(exp.id);
       }
-      setDownloadedExportIds(getDownloadedExportIds());
+      setDownloadCounts(getDownloadCounts());
       setSelectedExportIds([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk download failed.");
@@ -493,6 +498,15 @@ export function MediaLibrary({
       setBulkDownloading(false);
       setBulkDownloadProgress(null);
     }
+  };
+
+  const downloadSelectedExports = async () => {
+    const selected = exports.filter((exp) => selectedExportIds.includes(exp.id));
+    await downloadExports(selected);
+  };
+
+  const downloadFirstExports = async (count: number) => {
+    await downloadExports(exports.slice(0, count));
   };
 
   const deleteExport = async (id: string, name: string) => {
@@ -980,44 +994,76 @@ export function MediaLibrary({
           </p>
           {exports.length ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised/60 px-3 py-2.5">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="space-y-2 rounded-xl border border-border bg-surface-raised/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllExports}
+                      disabled={bulkDownloading}
+                      className="text-xs font-medium text-accent hover:underline disabled:opacity-50"
+                    >
+                      Select all ({exports.length})
+                    </button>
+                    {selectedExportIds.length ? (
+                      <>
+                        <span className="text-xs text-muted">·</span>
+                        <button
+                          type="button"
+                          onClick={clearExportSelection}
+                          disabled={bulkDownloading}
+                          className="text-xs font-medium text-muted hover:text-foreground disabled:opacity-50"
+                        >
+                          Clear
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
-                    onClick={selectAllExports}
-                    disabled={bulkDownloading}
-                    className="text-xs font-medium text-accent hover:underline disabled:opacity-50"
+                    disabled={bulkDownloading || !selectedExportIds.length}
+                    onClick={() => void downloadSelectedExports()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-fg disabled:opacity-50"
                   >
-                    Select all ({exports.length})
+                    {bulkDownloading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    Download selected
+                    {selectedExportIds.length ? ` (${selectedExportIds.length})` : ""}
                   </button>
-                  {selectedExportIds.length ? (
-                    <>
-                      <span className="text-xs text-muted">·</span>
-                      <button
-                        type="button"
-                        onClick={clearExportSelection}
-                        disabled={bulkDownloading}
-                        className="text-xs font-medium text-muted hover:text-foreground disabled:opacity-50"
-                      >
-                        Clear
-                      </button>
-                    </>
-                  ) : null}
                 </div>
-                <button
-                  type="button"
-                  disabled={bulkDownloading || !selectedExportIds.length}
-                  onClick={() => void downloadSelectedExports()}
-                  className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-fg disabled:opacity-50"
-                >
-                  {bulkDownloading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Download className="h-3.5 w-3.5" />
-                  )}
-                  Download selected
-                  {selectedExportIds.length ? ` (${selectedExportIds.length})` : ""}
-                </button>
+                <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                    Quick batches
+                  </span>
+                  {EXPORT_BATCH_SIZES.map((size) => {
+                    const available = Math.min(size, exports.length);
+                    if (!available) return null;
+                    return (
+                      <div key={size} className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={bulkDownloading}
+                          onClick={() => selectFirstExports(available)}
+                          className="rounded-lg border border-border px-2 py-1 text-xs text-muted hover:text-foreground disabled:opacity-50"
+                        >
+                          Select {available}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={bulkDownloading}
+                          onClick={() => void downloadFirstExports(available)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-xs font-medium hover:border-accent disabled:opacity-50"
+                        >
+                          <Download className="h-3 w-3" />
+                          Download {available}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               {bulkDownloadProgress ? (
                 <p className="text-xs text-muted">
@@ -1029,7 +1075,7 @@ export function MediaLibrary({
               <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {exports.map((exp) => {
                   const selected = selectedExportIds.includes(exp.id);
-                  const downloaded = downloadedExportIds.has(exp.id);
+                  const downloadCount = downloadCounts[exp.id] ?? 0;
 
                   return (
                     <li
@@ -1065,19 +1111,21 @@ export function MediaLibrary({
                         <p className="text-[11px] text-muted">
                           {formatDate(exp.createdAt)}
                           {exp.runFolder ? ` · ${exp.runFolder}` : ""}
+                          {downloadCount > 0
+                            ? ` · Downloaded ${downloadCount}×`
+                            : ""}
                         </p>
                         <div className="flex flex-wrap items-center gap-3">
                           <DownloadButton
                             url={exp.url}
                             filename={exportDownloadFilename(exp)}
                             trackingId={exp.id}
-                            downloaded={downloaded}
-                            onDownloaded={(id) => {
-                              setDownloadedExportIds((current) => {
-                                const next = new Set(current);
-                                next.add(id);
-                                return next;
-                              });
+                            downloadCount={downloadCount}
+                            onDownloaded={(id, count) => {
+                              setDownloadCounts((current) => ({
+                                ...current,
+                                [id]: count,
+                              }));
                             }}
                           />
                           <button

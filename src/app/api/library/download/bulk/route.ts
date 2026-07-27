@@ -12,6 +12,7 @@ export const maxDuration = 300;
 
 type BulkDownloadBody = {
   items?: Array<{ url: string; filename: string }>;
+  ids?: string[];
   folderName?: string;
 };
 
@@ -87,6 +88,14 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const ids = body.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
+  if (ids.length) {
+    const resolved = await itemsFromIds(ids);
+    if (resolved instanceof NextResponse) return resolved;
+    const folderName = resolveDownloadFolderName(resolved.length, body.folderName);
+    return handleDownload(resolved, folderName);
   }
 
   const items = body.items?.filter(

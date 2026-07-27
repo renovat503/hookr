@@ -14,8 +14,8 @@ type DownloadButtonProps = {
   iconClassName?: string;
   /** When set, marks this export as downloaded in local storage on success */
   trackingId?: string;
-  downloaded?: boolean;
-  onDownloaded?: (trackingId: string) => void;
+  downloadCount?: number;
+  onDownloaded?: (trackingId: string, count: number) => void;
 };
 
 export function DownloadButton({
@@ -25,11 +25,15 @@ export function DownloadButton({
   className,
   iconClassName = "h-3.5 w-3.5",
   trackingId,
-  downloaded = false,
+  downloadCount = 0,
   onDownloaded,
 }: DownloadButtonProps) {
   const [busy, setBusy] = useState(false);
-  const displayLabel = downloaded && label === "Download" ? "Download again" : label;
+  const downloaded = downloadCount > 0;
+  const displayLabel =
+    downloaded && label === "Download"
+      ? `Downloaded · ${downloadCount}×`
+      : label;
 
   return (
     <button
@@ -45,8 +49,8 @@ export function DownloadButton({
               trackingId,
             );
             if (trackingId) {
-              markExportDownloaded(trackingId);
-              onDownloaded?.(trackingId);
+              const count = markExportDownloaded(trackingId);
+              onDownloaded?.(trackingId, count);
             }
           } catch (err) {
             window.alert(

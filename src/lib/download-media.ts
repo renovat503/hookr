@@ -10,41 +10,34 @@ export function exportDownloadFilename(exp: LibraryExport): string {
   return filenameFromMediaUrl(exp.url, `${exp.id}.mp4`);
 }
 
-function triggerBrowserDownload(url: string) {
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = url;
+  anchor.href = objectUrl;
+  anchor.download = filename;
   anchor.rel = "noopener";
   anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
 }
 
-function buildBulkDownloadUrl(
+function buildBulkDownloadBody(
   items: Array<{ id?: string; url: string; filename: string }>,
   folderName: string,
-): string {
+) {
   const ids = items.map((item) => item.id).filter(Boolean) as string[];
-
   if (ids.length === items.length) {
-    const params = new URLSearchParams({
-      ids: ids.join(","),
-      folderName,
-    });
-    return `/api/library/download/bulk?${params.toString()}`;
+    return { ids, folderName };
   }
-
-  if (items.length === 1) {
-    const item = items[0]!;
-    const params = new URLSearchParams({
+  return {
+    items: items.map((item) => ({
       url: item.url,
       filename: item.filename,
-      folderName,
-    });
-    return `/api/library/download/bulk?${params.toString()}`;
-  }
-
-  throw new Error("Bulk download requires export ids.");
+    })),
+    folderName,
+  };
 }
 
 export type BulkDownloadProgress = {
@@ -74,7 +67,20 @@ export async function downloadMediaZip(
     folderName,
   });
 
-  const downloadUrl = buildBulkDownloadUrl(items, folderName);
+  const response = await fetch("/api/library/download/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(buildBulkDownloadBody(items, folderName)),
+  });
+
+  if (!response.ok) {
+    const err = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(
+      err?.error ?? `Could not prepare download (${response.status}).`,
+    );
+  }
 
   options?.onProgress?.({
     phase: "downloading",
@@ -82,11 +88,13 @@ export async function downloadMediaZip(
     folderName,
   });
 
-  triggerBrowserDownload(downloadUrl);
+  const blob = await response.blob();
+  const zipFilename = `${folderName}.zip`;
+  triggerBlobDownload(blob, zipFilename);
 
   return {
     folderName,
-    zipFilename: `${folderName}.zip`,
+    zipFilename,
     fileCount: items.length,
   };
 }
@@ -103,6 +111,7 @@ export async function downloadMedia(
 export async function downloadMediaBulk(
   items: Array<{ id?: string; url: string; filename: string }>,
   options?: {
+    folderName?: string;
     onProgress?: (progress: BulkDownloadProgress) => void;
   },
 ): Promise<{ downloaded: number; failed: string[]; folderName: string }> {
