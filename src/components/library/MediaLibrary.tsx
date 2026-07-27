@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Clapperboard,
+  Download,
   Loader2,
   MessageSquareText,
   Music2,
@@ -15,6 +16,15 @@ import {
 import { CaptionLibraryPanel } from "@/components/library/CaptionLibraryPanel";
 import { DownloadButton } from "@/components/ui/DownloadButton";
 import { MediaPlayer, ReelPlayer } from "@/components/ui/ReelPlayer";
+import {
+  downloadMediaBulk,
+  exportDownloadFilename,
+  type BulkDownloadProgress,
+} from "@/lib/download-media";
+import {
+  getDownloadedExportIds,
+  markExportDownloaded,
+} from "@/lib/downloaded-exports";
 import type { Campaign, LibraryData, LibraryExport } from "@/lib/types";
 import { hookCopyLabel } from "@/lib/campaign-hooks";
 import { cn, friendlyFetchError, isCompleteHook, safeUploadFilename } from "@/lib/utils";
@@ -113,6 +123,13 @@ export function MediaLibrary({
   const [deletingHookId, setDeletingHookId] = useState<string | null>(null);
   const [deletingMotionId, setDeletingMotionId] = useState<string | null>(null);
   const [deletingExportId, setDeletingExportId] = useState<string | null>(null);
+  const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDownloadProgress, setBulkDownloadProgress] =
+    useState<BulkDownloadProgress | null>(null);
+  const [downloadedExportIds, setDownloadedExportIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [savingMotionHookId, setSavingMotionHookId] = useState<string | null>(
     null,
   );
@@ -121,6 +138,17 @@ export function MediaLibrary({
   const hookFileRef = useRef<HTMLInputElement>(null);
   const musicFileRef = useRef<HTMLInputElement>(null);
   const motionFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDownloadedExportIds(getDownloadedExportIds());
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "exports") {
+      setSelectedExportIds([]);
+      setBulkDownloadProgress(null);
+    }
+  }, [tab]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -420,6 +448,71 @@ export function MediaLibrary({
     }
   };
 
+  const toggleExportSelection = (exportId: string) => {
+    setSelectedExportIds((current) =>
+      current.includes(exportId)
+        ? current.filter((id) => id !== exportId)
+        : [...current, exportId],
+    );
+  };
+
+  const selectAllExports = () => {
+    setSelectedExportIds(exports.map((exp) => exp.id));
+  };
+
+  const clearExportSelection = () => {
+    setSelectedExportIds([]);
+  };
+
+  const downloadSelectedExports = async () => {
+    const selected = exports.filter((exp) => selectedExportIds.includes(exp.id));
+    if (!selected.length) return;
+
+    setBulkDownloading(true);
+    setBulkDownloadProgress(null);
+    setError(null);
+
+    try {
+      const result = await downloadMediaBulk(
+        selected.map((exp) => ({
+          url: exp.url,
+          filename: exportDownloadFilename(exp),
+        })),
+        { onProgress: setBulkDownloadProgress },
+      );
+
+      for (const exp of selected) {
+        if (!result.failed.includes(exportDownloadFilename(exp))) {
+          markExportDownloaded(exp.id);
+        }
+      }
+      setDownloadedExportIds(getDownloadedExportIds());
+
+      if (result.failed.length) {
+        setError(
+          `Downloaded ${result.downloaded} of ${selected.length}. Failed: ${result.failed.slice(0, 3).join(", ")}${result.failed.length > 3 ? "…" : ""}`,
+        );
+      }
+
+      if (result.downloaded > 0) {
+        setSelectedExportIds((current) =>
+          current.filter((id) =>
+            selected.some(
+              (exp) =>
+                exp.id === id &&
+                result.failed.includes(exportDownloadFilename(exp)),
+            ),
+          ),
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk download failed.");
+    } finally {
+      setBulkDownloading(false);
+      setBulkDownloadProgress(null);
+    }
+  };
+
   const deleteExport = async (id: string, name: string) => {
     if (
       !window.confirm(
@@ -437,6 +530,7 @@ export function MediaLibrary({
       );
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not delete export.");
+      setSelectedExportIds((current) => current.filter((item) => item !== id));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete export.");
@@ -903,45 +997,126 @@ export function MediaLibrary({
             page.
           </p>
           {exports.length ? (
-            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {exports.map((exp) => (
-                <li
-                  key={exp.id}
-                  className="overflow-hidden rounded-2xl border border-border bg-surface/70"
-                >
-                  <ReelPlayer
-                    size="sm"
-                    src={exp.url}
-                    controls
-                    playsInline
-                    preload="metadata"
-                  />
-                  <div className="space-y-2 p-4">
-                    <p className="line-clamp-2 text-sm font-medium">{exp.name}</p>
-                    <p className="text-[11px] text-muted">
-                      {formatDate(exp.createdAt)}
-                      {exp.runFolder ? ` · ${exp.runFolder}` : ""}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <DownloadButton url={exp.url} filename={`${exp.id}.mp4`} />
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-raised/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllExports}
+                    disabled={bulkDownloading}
+                    className="text-xs font-medium text-accent hover:underline disabled:opacity-50"
+                  >
+                    Select all ({exports.length})
+                  </button>
+                  {selectedExportIds.length ? (
+                    <>
+                      <span className="text-xs text-muted">·</span>
                       <button
                         type="button"
-                        disabled={deletingExportId === exp.id}
-                        onClick={() => void deleteExport(exp.id, exp.name)}
-                        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-danger disabled:opacity-50"
+                        onClick={clearExportSelection}
+                        disabled={bulkDownloading}
+                        className="text-xs font-medium text-muted hover:text-foreground disabled:opacity-50"
                       >
-                        {deletingExportId === exp.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                        Delete
+                        Clear
                       </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    </>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  disabled={bulkDownloading || !selectedExportIds.length}
+                  onClick={() => void downloadSelectedExports()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-fg disabled:opacity-50"
+                >
+                  {bulkDownloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  Download selected
+                  {selectedExportIds.length ? ` (${selectedExportIds.length})` : ""}
+                </button>
+              </div>
+              {bulkDownloadProgress ? (
+                <p className="text-xs text-muted">
+                  Downloading {bulkDownloadProgress.current} of{" "}
+                  {bulkDownloadProgress.total}: {bulkDownloadProgress.filename}
+                </p>
+              ) : null}
+              <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {exports.map((exp) => {
+                  const selected = selectedExportIds.includes(exp.id);
+                  const downloaded = downloadedExportIds.has(exp.id);
+
+                  return (
+                    <li
+                      key={exp.id}
+                      className={cn(
+                        "overflow-hidden rounded-2xl border bg-surface/70",
+                        selected
+                          ? "border-accent ring-1 ring-accent/30"
+                          : "border-border",
+                      )}
+                    >
+                      <div className="relative">
+                        <label className="absolute left-3 top-3 z-10 flex cursor-pointer items-center gap-2 rounded-lg bg-black/55 px-2 py-1.5 text-xs font-medium text-white backdrop-blur-sm">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={bulkDownloading}
+                            onChange={() => toggleExportSelection(exp.id)}
+                            className="accent-accent"
+                          />
+                          Select
+                        </label>
+                        <ReelPlayer
+                          size="sm"
+                          src={exp.url}
+                          controls
+                          playsInline
+                          preload="metadata"
+                        />
+                      </div>
+                      <div className="space-y-2 p-4">
+                        <p className="line-clamp-2 text-sm font-medium">{exp.name}</p>
+                        <p className="text-[11px] text-muted">
+                          {formatDate(exp.createdAt)}
+                          {exp.runFolder ? ` · ${exp.runFolder}` : ""}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <DownloadButton
+                            url={exp.url}
+                            filename={exportDownloadFilename(exp)}
+                            trackingId={exp.id}
+                            downloaded={downloaded}
+                            onDownloaded={(id) => {
+                              setDownloadedExportIds((current) => {
+                                const next = new Set(current);
+                                next.add(id);
+                                return next;
+                              });
+                            }}
+                          />
+                          <button
+                            type="button"
+                            disabled={deletingExportId === exp.id || bulkDownloading}
+                            onClick={() => void deleteExport(exp.id, exp.name)}
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-danger disabled:opacity-50"
+                          >
+                            {deletingExportId === exp.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : (
             <EmptyState
               icon={Share2}

@@ -1,6 +1,12 @@
+import type { LibraryExport } from "@/lib/types";
+
 export function filenameFromMediaUrl(url: string, fallback = "video.mp4") {
   const segment = url.split("/").pop()?.split("?")[0]?.trim();
   return segment && segment.length > 0 ? segment : fallback;
+}
+
+export function exportDownloadFilename(exp: LibraryExport): string {
+  return filenameFromMediaUrl(exp.url, `${exp.id}.mp4`);
 }
 
 function buildDownloadApiUrl(url: string, filename: string) {
@@ -43,4 +49,44 @@ export async function downloadMedia(url: string, filename: string) {
   } finally {
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   }
+}
+
+export type BulkDownloadProgress = {
+  current: number;
+  total: number;
+  filename: string;
+};
+
+export async function downloadMediaBulk(
+  items: Array<{ url: string; filename: string }>,
+  options?: {
+    onProgress?: (progress: BulkDownloadProgress) => void;
+    delayMs?: number;
+  },
+): Promise<{ downloaded: number; failed: string[] }> {
+  const failed: string[] = [];
+  let downloaded = 0;
+  const delayMs = options?.delayMs ?? 400;
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]!;
+    options?.onProgress?.({
+      current: index + 1,
+      total: items.length,
+      filename: item.filename,
+    });
+
+    try {
+      await downloadMedia(item.url, item.filename);
+      downloaded += 1;
+    } catch {
+      failed.push(item.filename);
+    }
+
+    if (index < items.length - 1 && delayMs > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+
+  return { downloaded, failed };
 }
