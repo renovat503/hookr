@@ -249,7 +249,7 @@ export function BulkScheduleModal({
 
         <div className="space-y-4 overflow-y-auto p-4">
           {error ? (
-            <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger whitespace-pre-wrap">
               {error}
             </p>
           ) : null}

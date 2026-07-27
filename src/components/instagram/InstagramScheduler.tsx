@@ -454,7 +454,7 @@ export function InstagramScheduler() {
   return (
     <div className="space-y-4">
       {error ? (
-        <p className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <p className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger whitespace-pre-wrap">
           {error}
         </p>
       ) : null}

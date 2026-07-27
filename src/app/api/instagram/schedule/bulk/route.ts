@@ -19,6 +19,7 @@ import {
   normalizeSlotTimes,
   slotKey,
 } from "@/lib/posting-slots";
+import { formatBulkScheduleFailure } from "@/lib/bulk-schedule-errors";
 import type { ScheduledPost } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -159,7 +160,10 @@ export async function POST(request: Request) {
 
     if (!scheduled.length) {
       return NextResponse.json(
-        { error: "No videos could be scheduled.", skipped },
+        {
+          error: formatBulkScheduleFailure(skipped),
+          skipped,
+        },
         { status: 400 },
       );
     }
