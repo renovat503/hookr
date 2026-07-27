@@ -1,54 +1,88 @@
-import { access } from "fs/promises";
-import path from "path";
-import { PassThrough } from "stream";
-import { Readable } from "stream";
-import { ZipArchive } from "archiver";
 import { NextResponse } from "next/server";
+import { readLibrary } from "@/lib/library-store";
 import {
-  isAllowedDownloadUrl,
-  sanitizeDownloadFilename,
-} from "@/lib/download-allowlist";
-import { createDownloadFolderName } from "@/lib/download-folder-name";
-import { resolveToLocalPath } from "@/lib/storage/media";
+  buildZipDownloadResponse,
+  exportDownloadFilenameFromUrl,
+  resolveDownloadFolderName,
+  type ZipDownloadItem,
+} from "@/lib/download-zip";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-type BulkDownloadItem = {
-  url: string;
-  filename: string;
+type BulkDownloadBody = {
+  items?: Array<{ url: string; filename: string }>;
+  folderName?: string;
 };
 
-async function resolveDownloadPath(mediaUrl: string): Promise<string> {
-  if (mediaUrl.startsWith("/")) {
-    const publicDir = path.resolve(path.join(process.cwd(), "public"));
-    const filePath = path.resolve(publicDir, mediaUrl.replace(/^\/+/, ""));
+function itemsFromIds(ids: string[]): Promise<ZipDownloadItem[] | NextResponse> {
+  return readLibrary("exports").then((library) => {
+    const exportsById = new Map(library.exports.map((exp) => [exp.id, exp]));
+    const items: ZipDownloadItem[] = [];
 
-    if (!filePath.startsWith(publicDir + path.sep) && filePath !== publicDir) {
-      throw new Error("Invalid download path.");
+    for (const id of ids) {
+      const exp = exportsById.get(id);
+      if (!exp) {
+        return NextResponse.json(
+          { error: `Export not found: ${id}` },
+          { status: 404 },
+        );
+      }
+      items.push({
+        url: exp.url,
+        filename: exportDownloadFilenameFromUrl(exp.url, exp.id),
+      });
     }
 
-    await access(filePath);
-    return filePath;
-  }
-
-  return resolveToLocalPath(mediaUrl);
-}
-
-function dedupeFilenames(filenames: string[]): string[] {
-  const seen = new Map<string, number>();
-  return filenames.map((filename) => {
-    const count = seen.get(filename) ?? 0;
-    seen.set(filename, count + 1);
-    if (count === 0) return filename;
-    const ext = path.extname(filename);
-    const base = path.basename(filename, ext);
-    return `${base}-${count + 1}${ext}`;
+    return items;
   });
 }
 
+async function handleDownload(
+  items: ZipDownloadItem[],
+  folderName: string,
+): Promise<NextResponse> {
+  try {
+    return await buildZipDownloadResponse(items, folderName);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Download failed.";
+    console.error("[library/download/bulk]", err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const idsParam = searchParams.get("ids")?.trim();
+  const url = searchParams.get("url")?.trim();
+  const filename = searchParams.get("filename")?.trim();
+  const requestedFolderName = searchParams.get("folderName");
+
+  if (idsParam) {
+    const ids = idsParam.split(",").map((id) => id.trim()).filter(Boolean);
+    if (!ids.length) {
+      return NextResponse.json({ error: "No export ids provided." }, { status: 400 });
+    }
+
+    const resolved = await itemsFromIds(ids);
+    if (resolved instanceof NextResponse) return resolved;
+    const folderName = resolveDownloadFolderName(resolved.length, requestedFolderName);
+    return handleDownload(resolved, folderName);
+  }
+
+  if (url && filename) {
+    const folderName = resolveDownloadFolderName(1, requestedFolderName);
+    return handleDownload([{ url, filename }], folderName);
+  }
+
+  return NextResponse.json(
+    { error: "Provide export ids or url+filename." },
+    { status: 400 },
+  );
+}
+
 export async function POST(request: Request) {
-  let body: { items?: BulkDownloadItem[]; folderName?: string };
+  let body: BulkDownloadBody;
   try {
     body = await request.json();
   } catch {
@@ -62,63 +96,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No files to download." }, { status: 400 });
   }
 
-  for (const item of items) {
-    if (!isAllowedDownloadUrl(item.url.trim())) {
-      return NextResponse.json(
-        { error: `Invalid download url: ${item.filename}` },
-        { status: 400 },
-      );
-    }
-  }
-
-  const folderName =
-    body.folderName?.replace(/[^\w.-]/g, "_").trim() ||
-    createDownloadFolderName(items.length === 1 ? "hookr-export" : "hookr-exports");
-
-  const sanitizedNames = dedupeFilenames(
-    items.map((item) => sanitizeDownloadFilename(item.filename)),
+  const folderName = resolveDownloadFolderName(
+    items.length,
+    body.folderName,
   );
 
-  const resolved: Array<{ localPath: string; zipPath: string }> = [];
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index]!;
-    try {
-      const localPath = await resolveDownloadPath(item.url.trim());
-      resolved.push({
-        localPath,
-        zipPath: `${folderName}/${sanitizedNames[index]!}`,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "File not found.";
-      return NextResponse.json(
-        { error: `Could not access ${sanitizedNames[index]}: ${message}` },
-        { status: 404 },
-      );
-    }
-  }
-
-  const archive = new ZipArchive({ zlib: { level: 5 } });
-  const passThrough = new PassThrough();
-
-  archive.on("error", (err) => {
-    passThrough.destroy(err);
-  });
-
-  archive.pipe(passThrough);
-
-  for (const file of resolved) {
-    archive.file(file.localPath, { name: file.zipPath });
-  }
-
-  void archive.finalize();
-
-  const webStream = Readable.toWeb(passThrough) as ReadableStream<Uint8Array>;
-
-  return new NextResponse(webStream, {
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${folderName}.zip"`,
-      "Cache-Control": "private, no-cache",
-    },
-  });
+  return handleDownload(
+    items.map((item) => ({
+      url: item.url.trim(),
+      filename: item.filename.trim(),
+    })),
+    folderName,
+  );
 }

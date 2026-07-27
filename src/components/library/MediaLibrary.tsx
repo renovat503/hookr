@@ -475,6 +475,7 @@ export function MediaLibrary({
     try {
       await downloadMediaBulk(
         selected.map((exp) => ({
+          id: exp.id,
           url: exp.url,
           filename: exportDownloadFilename(exp),
         })),

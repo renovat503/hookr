@@ -42,6 +42,7 @@ export function DownloadButton({
             await downloadMedia(
               url,
               filename ?? filenameFromMediaUrl(url),
+              trackingId,
             );
             if (trackingId) {
               markExportDownloaded(trackingId);
