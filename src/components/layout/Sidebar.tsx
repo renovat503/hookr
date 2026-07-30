@@ -12,6 +12,7 @@ import {
   LogOut,
   Share2,
   Sparkles,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_NAME } from "@/lib/constants";
@@ -42,6 +43,12 @@ const NAV = [
     label: "Instagram",
     icon: Share2,
     match: (p: string) => p.startsWith("/instagram"),
+  },
+  {
+    href: "/youtube",
+    label: "YouTube",
+    icon: Video,
+    match: (p: string) => p.startsWith("/youtube"),
   },
 ];
 

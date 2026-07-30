@@ -197,3 +197,61 @@ export const instagramMeta = pgTable("instagram_meta", {
     mode: "string",
   }),
 });
+
+export const youtubeAccounts = pgTable("youtube_accounts", {
+  id: text("id").primaryKey(),
+  campaignId: text("campaign_id"),
+  channelId: text("channel_id").notNull(),
+  channelTitle: text("channel_title").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  connectedAt: timestamp("connected_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
+  tokenExpiresAt: timestamp("token_expires_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
+});
+
+export const youtubeScheduledPosts = pgTable("youtube_scheduled_posts", {
+  id: text("id").primaryKey(),
+  campaignId: text("campaign_id"),
+  accountId: text("account_id").notNull(),
+  exportId: text("export_id").notNull(),
+  exportName: text("export_name"),
+  title: text("title").notNull().default(""),
+  description: text("description").notNull().default(""),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true, mode: "string" })
+    .notNull(),
+  status: text("status").notNull(),
+  source: text("source").$type<"manual" | "queue" | "auto">().notNull().default("manual"),
+  queuePosition: integer("queue_position"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .notNull()
+    .defaultNow(),
+  publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
+  youtubeVideoId: text("youtube_video_id"),
+  error: text("error"),
+});
+
+export const youtubeMeta = pgTable("youtube_meta", {
+  id: text("id").primaryKey().default("default"),
+  publishedExportIds: jsonb("published_export_ids")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  accountLastPublishedAt: jsonb("account_last_published_at")
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
+  accountPostingGoals: jsonb("account_posting_goals")
+    .$type<Record<string, { postsPerDay: number; slotTimes: string[] }>>()
+    .notNull()
+    .default({}),
+  quotaExhaustedUntil: timestamp("quota_exhausted_until", {
+    withTimezone: true,
+    mode: "string",
+  }),
+});

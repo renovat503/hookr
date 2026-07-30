@@ -50,6 +50,16 @@ export function instagramOAuthRedirectUri(request?: Request) {
   return instagramRedirectUri(resolveAppUrl(request));
 }
 
+export function youtubeRedirectUri(appUrl: string) {
+  return `${appUrl.replace(/\/$/, "")}/api/youtube/callback`;
+}
+
+export function youtubeOAuthRedirectUri(request?: Request) {
+  const explicit = process.env.YOUTUBE_OAUTH_REDIRECT_URI?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  return youtubeRedirectUri(resolveAppUrl(request));
+}
+
 export function readRequestCookie(
   cookieHeader: string,
   name: string,

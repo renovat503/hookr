@@ -10,6 +10,11 @@ import {
 } from "@/lib/calendar-utils";
 import type { AccountPostingGoal, ScheduledPost } from "@/lib/types";
 
+export type SlotScheduledPost = Pick<
+  ScheduledPost,
+  "id" | "accountId" | "scheduledAt" | "status"
+>;
+
 export const DEFAULT_POSTING_GOAL: AccountPostingGoal = {
   postsPerDay: 3,
   slotTimes: ["06:00", "09:00", "12:00"],
@@ -121,7 +126,7 @@ export function addWeeks(date: Date, weeks: number): Date {
 const OCCUPIED_STATUSES = new Set(["scheduled", "publishing"]);
 
 export function getOccupiedSlotKeys(
-  posts: ScheduledPost[],
+  posts: SlotScheduledPost[],
   accountId: string,
   slotTimes: string[],
 ): Set<string> {
@@ -134,7 +139,7 @@ export function getOccupiedSlotKeys(
 }
 
 export function getOccupiedSlotKeysInOffset(
-  posts: ScheduledPost[],
+  posts: SlotScheduledPost[],
   accountId: string,
   slotTimes: string[],
   timezoneOffsetMinutes: number,
@@ -156,12 +161,12 @@ export function getOccupiedSlotKeysInOffset(
   return occupied;
 }
 
-export function findPostForSlot(
-  posts: ScheduledPost[],
+export function findPostForSlot<T extends SlotScheduledPost>(
+  posts: T[],
   accountId: string,
   dateIso: string,
   time: string,
-): ScheduledPost | null {
+): T | null {
   return (
     posts.find((post) => {
       if (post.accountId !== accountId) return false;

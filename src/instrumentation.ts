@@ -26,6 +26,7 @@ export async function register() {
   }, 15_000);
 
   const { processInstagramDue } = await import("./lib/process-instagram-due");
+  const { processYouTubeDue } = await import("./lib/process-youtube-due");
 
   const tick = () => {
     void processInstagramDue().catch((err) => {
@@ -35,7 +36,18 @@ export async function register() {
           ? err.cause.message
           : null;
       console.error(
-        "[hookr/scheduled-posts]",
+        "[hookr/scheduled-posts/instagram]",
+        cause ? `${message} (${cause})` : message,
+      );
+    });
+    void processYouTubeDue().catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      const cause =
+        err instanceof Error && err.cause instanceof Error
+          ? err.cause.message
+          : null;
+      console.error(
+        "[hookr/scheduled-posts/youtube]",
         cause ? `${message} (${cause})` : message,
       );
     });

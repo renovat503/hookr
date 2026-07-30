@@ -286,3 +286,42 @@ export type InstagramData = {
   /** Skip Instagram API calls until this time after a rate-limit error (ISO) */
   apiRateLimitedUntil?: string | null;
 };
+
+export type YouTubeAccount = {
+  id: string;
+  campaignId?: string | null;
+  channelId: string;
+  channelTitle: string;
+  thumbnailUrl?: string | null;
+  accessToken: string;
+  refreshToken?: string | null;
+  connectedAt: string;
+  tokenExpiresAt?: string | null;
+};
+
+export type YouTubeScheduledPost = {
+  id: string;
+  campaignId?: string | null;
+  accountId: string;
+  exportId: string;
+  exportName?: string;
+  title: string;
+  description: string;
+  scheduledAt: string;
+  status: ScheduledPostStatus;
+  source?: ScheduledPostSource;
+  queuePosition?: number | null;
+  createdAt: string;
+  publishedAt?: string | null;
+  youtubeVideoId?: string | null;
+  error?: string | null;
+};
+
+export type YouTubeData = {
+  accounts: YouTubeAccount[];
+  scheduledPosts: YouTubeScheduledPost[];
+  publishedExportIds: string[];
+  accountLastPublishedAt: Record<string, string>;
+  accountPostingGoals?: Record<string, AccountPostingGoal>;
+  quotaExhaustedUntil?: string | null;
+};
