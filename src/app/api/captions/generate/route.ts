@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateCaptionsFromLibrary } from "@/lib/gemini-captions";
+import { appendCaptionsToActiveCampaign } from "@/lib/sync-campaign-assets";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,6 +18,10 @@ export async function POST(request: Request) {
       theme: body.theme,
       saveToLibrary: body.saveToLibrary ?? true,
     });
+
+    if (result.addedIds.length) {
+      await appendCaptionsToActiveCampaign(result.addedIds);
+    }
 
     return NextResponse.json(result);
   } catch (err) {

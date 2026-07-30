@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import { isInstagramRateLimited } from "@/lib/instagram-errors";
 import {
   getAccountQueuePosts,
@@ -29,9 +30,10 @@ export async function GET(request: Request) {
   try {
     const config = getInstagramConfig(request);
     const mediaBase = getPublicMediaBaseUrl();
+    const campaignId = await getActiveCampaignId();
     const [instagram, library] = await Promise.all([
-      withQueryTimeout(readInstagram(), 20_000, "instagram read"),
-      readLibrary("exports"),
+      withQueryTimeout(readInstagram(campaignId), 20_000, "instagram read"),
+      readLibrary("exports", { campaignId }),
     ]);
 
     const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));

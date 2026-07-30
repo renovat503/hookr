@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import {
   characters as charactersTable,
@@ -180,13 +180,22 @@ export async function readLibraryPgForAssets(
 }
 
 /** Hooks, demos, music, and export index — for Produce planning and batch export. */
-export async function readLibraryPgForProduce(): Promise<LibraryData> {
+export async function readLibraryPgForProduce(
+  campaignId?: string | null,
+): Promise<LibraryData> {
   const db = getDb();
+  const exportWhere = campaignId
+    ? and(eq(exportsTable.status, "ready"), eq(exportsTable.campaignId, campaignId))
+    : eq(exportsTable.status, "ready");
   const [hookRows, demoRows, musicRows, exportRows] = await Promise.all([
     db.select().from(hooksTable).orderBy(desc(hooksTable.createdAt)),
     db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
     db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
-    db.select().from(exportsTable).orderBy(desc(exportsTable.createdAt)),
+    db
+      .select()
+      .from(exportsTable)
+      .where(exportWhere)
+      .orderBy(desc(exportsTable.createdAt)),
   ]);
 
   return {
@@ -200,12 +209,17 @@ export async function readLibraryPgForProduce(): Promise<LibraryData> {
 }
 
 /** Finished exports only — for Instagram scheduling. */
-export async function readLibraryPgForExports(): Promise<LibraryData> {
+export async function readLibraryPgForExports(
+  campaignId?: string | null,
+): Promise<LibraryData> {
   const db = getDb();
+  const exportWhere = campaignId
+    ? and(eq(exportsTable.status, "ready"), eq(exportsTable.campaignId, campaignId))
+    : eq(exportsTable.status, "ready");
   const exportRows = await db
     .select()
     .from(exportsTable)
-    .where(eq(exportsTable.status, "ready"))
+    .where(exportWhere)
     .orderBy(desc(exportsTable.createdAt));
 
   return {

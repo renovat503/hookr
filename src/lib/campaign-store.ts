@@ -13,6 +13,7 @@ import {
   updateCampaignPg,
   writeCampaignsPg,
 } from "@/lib/db/stores/campaigns";
+import { copyHooksToCampaign } from "@/lib/copy-hooks-to-campaign";
 import type { Campaign, CampaignsData } from "./types";
 import { DEFAULT_MUSIC_VOLUME } from "./constants";
 
@@ -65,6 +66,10 @@ function normalizeCampaign(raw: unknown): Campaign | null {
     borrowAssetKind:
       item.borrowAssetKind === "hooks" || item.borrowAssetKind === "demos"
         ? item.borrowAssetKind
+        : null,
+    copiedFromCampaignId:
+      typeof item.copiedFromCampaignId === "string"
+        ? item.copiedFromCampaignId
         : null,
     status: item.status === "closed" ? "closed" : "open",
     createdAt:
@@ -167,6 +172,7 @@ export async function addCampaign(
     randomFormat: input.randomFormat,
     borrowFromCampaignId: input.borrowFromCampaignId ?? null,
     borrowAssetKind: input.borrowAssetKind ?? null,
+    copiedFromCampaignId: input.copiedFromCampaignId ?? null,
     status: input.status ?? "open",
     createdAt: now,
     updatedAt: now,
@@ -232,6 +238,10 @@ export async function updateCampaign(
       patch.borrowAssetKind !== undefined
         ? patch.borrowAssetKind
         : current.borrowAssetKind ?? null,
+    copiedFromCampaignId:
+      patch.copiedFromCampaignId !== undefined
+        ? patch.copiedFromCampaignId
+        : current.copiedFromCampaignId ?? null,
     status:
       patch.status === "closed" || patch.status === "open"
         ? patch.status
@@ -290,4 +300,40 @@ export async function replaceAllCampaigns(data: CampaignsData): Promise<void> {
   if (usesPostgresWrite()) {
     await writeCampaignsPg(data);
   }
+}
+
+export async function duplicateCampaign(
+  sourceId: string,
+  name?: string,
+): Promise<Campaign> {
+  const source = await getCampaign(sourceId);
+  if (!source) {
+    throw new Error("Source campaign not found.");
+  }
+
+  const newCampaign = await addCampaign({
+    name: name?.trim() || `Copy of ${source.name}`,
+    status: "open",
+    hookIds: [],
+    demoIds: [...source.demoIds],
+    captionIds: [...source.captionIds],
+    useCaptions: source.useCaptions,
+    audioMode: source.audioMode,
+    musicId: source.musicId,
+    musicVolume: source.musicVolume,
+    randomFormat: source.randomFormat,
+    borrowFromCampaignId: null,
+    borrowAssetKind: null,
+    copiedFromCampaignId: sourceId,
+  });
+
+  try {
+    await copyHooksToCampaign(sourceId, newCampaign.id);
+  } catch (err) {
+    await removeCampaign(newCampaign.id);
+    throw err;
+  }
+
+  const updated = await getCampaign(newCampaign.id);
+  return updated ?? newCampaign;
 }

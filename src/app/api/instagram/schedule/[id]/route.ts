@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import { validateScheduleInstant } from "@/lib/calendar-utils";
 import {
   readInstagram,
@@ -25,7 +26,8 @@ export async function DELETE(_request: Request, { params }: Params) {
 export async function PATCH(request: Request, { params }: Params) {
   const { id } = await params;
   const body = (await request.json()) as PatchBody;
-  const instagram = await readInstagram();
+  const campaignId = await getActiveCampaignId();
+  const instagram = await readInstagram(campaignId);
   const existing = instagram.scheduledPosts.find((post) => post.id === id);
   if (!existing) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });

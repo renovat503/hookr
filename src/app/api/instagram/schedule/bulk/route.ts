@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import {
   getSchedulePartsInOffset,
   validateScheduleInstant,
@@ -86,7 +87,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const instagram = await readInstagram();
+    const campaignId = await getActiveCampaignId();
+    const instagram = await readInstagram(campaignId);
     const goal = getPostingGoalForAccount(
       instagram.accountPostingGoals,
       accountId,
@@ -100,7 +102,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const library = await readLibrary("exports");
+    const library = await readLibrary("exports", { campaignId });
     const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
     const reserved = getReservedExportIdsForAccount(instagram, accountId);
     const occupied = getOccupiedSlotKeysInOffset(
@@ -157,6 +159,7 @@ export async function POST(request: Request) {
 
       const post: ScheduledPost = {
         id: `sched-bulk-${Date.now()}-${scheduled.length}`,
+        campaignId,
         accountId,
         exportId,
         exportName: exp.name,

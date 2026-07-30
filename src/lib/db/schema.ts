@@ -43,6 +43,7 @@ export const campaigns = pgTable("campaigns", {
   randomFormat: boolean("random_format").notNull().default(true),
   borrowFromCampaignId: text("borrow_from_campaign_id"),
   borrowAssetKind: text("borrow_asset_kind").$type<CampaignBorrowAssetKind | null>(),
+  copiedFromCampaignId: text("copied_from_campaign_id"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()
     .defaultNow(),
@@ -139,6 +140,7 @@ export const exportsTable = pgTable("exports", {
 
 export const instagramAccounts = pgTable("instagram_accounts", {
   id: text("id").primaryKey(),
+  campaignId: text("campaign_id"),
   igUserId: text("ig_user_id").notNull(),
   username: text("username").notNull(),
   profilePictureUrl: text("profile_picture_url"),
@@ -156,6 +158,7 @@ export const instagramAccounts = pgTable("instagram_accounts", {
 
 export const scheduledPosts = pgTable("scheduled_posts", {
   id: text("id").primaryKey(),
+  campaignId: text("campaign_id"),
   accountId: text("account_id").notNull(),
   exportId: text("export_id").notNull(),
   exportName: text("export_name"),

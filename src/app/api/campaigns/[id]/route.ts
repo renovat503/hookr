@@ -62,52 +62,42 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const borrowFromCampaignId =
-      body.borrowFromCampaignId !== undefined
-        ? body.borrowFromCampaignId
-        : existing.borrowFromCampaignId ?? null;
-    const borrowAssetKind =
-      body.borrowAssetKind !== undefined
-        ? body.borrowAssetKind
-        : existing.borrowAssetKind ?? null;
-
-    if (borrowFromCampaignId && !borrowAssetKind) {
+    if (
+      body.borrowFromCampaignId !== undefined &&
+      body.borrowFromCampaignId !== existing.borrowFromCampaignId
+    ) {
       return NextResponse.json(
-        { error: "Choose whether to reuse hooks or demos from the linked campaign." },
+        {
+          error:
+            "Changing reuse links is disabled. Duplicate a campaign to copy hooks and settings.",
+        },
         { status: 400 },
       );
     }
-    if (borrowAssetKind && !borrowFromCampaignId) {
+    if (
+      body.borrowAssetKind !== undefined &&
+      body.borrowAssetKind !== existing.borrowAssetKind
+    ) {
       return NextResponse.json(
-        { error: "Select a campaign to reuse hooks or demos from." },
+        {
+          error:
+            "Changing reuse links is disabled. Duplicate a campaign to copy hooks and settings.",
+        },
         { status: 400 },
       );
-    }
-    if (borrowFromCampaignId) {
-      if (borrowFromCampaignId === id) {
-        return NextResponse.json(
-          { error: "A campaign cannot reuse assets from itself." },
-          { status: 400 },
-        );
-      }
-      const all = await readCampaigns();
-      const source = all.campaigns.find((c) => c.id === borrowFromCampaignId);
-      if (!source) {
-        return NextResponse.json(
-          { error: "Linked campaign not found." },
-          { status: 400 },
-        );
-      }
     }
 
     const updated = await updateCampaign(id, {
-      ...body,
+      name: body.name,
+      hookIds: body.hookIds,
+      demoIds: body.demoIds,
       captionIds: useCaptions ? captionIds : [],
       useCaptions,
       audioMode,
       musicId: audioMode === "none" ? null : musicId,
-      borrowFromCampaignId,
-      borrowAssetKind,
+      musicVolume: body.musicVolume,
+      randomFormat: body.randomFormat,
+      status: body.status,
     });
 
     if (!updated) {

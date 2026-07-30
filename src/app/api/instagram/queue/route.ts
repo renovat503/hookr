@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import {
   addScheduledPost,
   isExportPublishedOnAccount,
@@ -28,8 +29,9 @@ type QueueBody = {
 
 export async function GET(request: Request) {
   const accountId = new URL(request.url).searchParams.get("accountId")?.trim();
-  const instagram = await readInstagram();
-  const library = await readLibrary("exports");
+  const campaignId = await getActiveCampaignId();
+  const instagram = await readInstagram(campaignId);
+  const library = await readLibrary("exports", { campaignId });
   const exportById = new Map(library.exports.map((exp) => [exp.id, exp]));
 
   if (accountId) {
@@ -78,7 +80,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const instagram = await readInstagram();
+    const campaignId = await getActiveCampaignId();
+  const instagram = await readInstagram(campaignId);
     const account = instagram.accounts.find((item) => item.id === accountId);
     if (!account) {
       return NextResponse.json(
@@ -108,7 +111,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const library = await readLibrary("exports");
+    const library = await readLibrary("exports", { campaignId });
     const exp = library.exports.find((item) => item.id === exportId);
     if (!exp || exp.status !== "ready") {
       return NextResponse.json(
@@ -119,6 +122,7 @@ export async function POST(request: Request) {
 
     const post: ScheduledPost = {
       id: `queue-${Date.now()}-${accountId}`,
+      campaignId,
       accountId,
       exportId,
       exportName: exp.name,
@@ -156,8 +160,16 @@ export async function PATCH(request: Request) {
       );
     }
 
-    await reorderAccountQueue(accountId, orderedIds);
-    const instagram = await readInstagram();
+    const campaignId = await getActiveCampaignId();
+    if (!campaignId) {
+      return NextResponse.json(
+        { error: "Select a campaign first." },
+        { status: 400 },
+      );
+    }
+
+    await reorderAccountQueue(accountId, orderedIds, campaignId);
+    const instagram = await readInstagram(campaignId);
     return NextResponse.json({
       queue: getAccountQueuePosts(instagram, accountId),
     });

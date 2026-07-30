@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import {
   parseLibraryScope,
   readLibrary,
@@ -11,7 +12,10 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const scope = parseLibraryScope(params.get("scope"));
-    const campaignId = params.get("campaignId")?.trim() || null;
+    let campaignId = params.get("campaignId")?.trim() || null;
+    if (scope === "exports" && !campaignId) {
+      campaignId = await getActiveCampaignId();
+    }
     const library = await readLibrary(scope, { campaignId });
     return NextResponse.json(library);
   } catch (err) {

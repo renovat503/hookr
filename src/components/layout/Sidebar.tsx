@@ -51,11 +51,24 @@ export function Sidebar() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
 
   useEffect(() => {
-    void fetch("/api/auth/session")
+    void fetch("/api/campaigns")
       .then((r) => r.json())
-      .then((json: { activeCampaign?: Campaign | null }) => {
-        setCampaign(json.activeCampaign ?? null);
-      })
+      .then(
+        (json: {
+          campaigns?: Campaign[];
+          activeId?: string | null;
+          activeCampaign?: Campaign | null;
+        }) => {
+          if (json.activeCampaign) {
+            setCampaign(json.activeCampaign);
+            return;
+          }
+          const active = json.activeId
+            ? json.campaigns?.find((c) => c.id === json.activeId) ?? null
+            : null;
+          setCampaign(active);
+        },
+      )
       .catch(() => undefined);
   }, [pathname]);
 

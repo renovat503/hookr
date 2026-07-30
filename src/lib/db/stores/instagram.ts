@@ -17,7 +17,10 @@ import type {
   ScheduledPostSource,
 } from "@/lib/types";
 
-const META_ID = "default";
+import {
+  migrateLegacyInstagramOnce,
+  repairInstagramCampaignScope,
+} from "@/lib/db/stores/instagram-campaign";
 
 function normalize(data: Partial<InstagramData>): InstagramData {
   const published = new Set(data.publishedExportIds ?? []);
@@ -68,6 +71,7 @@ function rowToAccount(
 ): InstagramAccount {
   return {
     id: row.id,
+    campaignId: row.campaignId,
     igUserId: row.igUserId,
     username: row.username,
     profilePictureUrl: row.profilePictureUrl,
@@ -84,6 +88,7 @@ function rowToScheduledPost(
 ): ScheduledPost {
   return {
     id: row.id,
+    campaignId: row.campaignId,
     accountId: row.accountId,
     exportId: row.exportId,
     exportName: row.exportName ?? undefined,
@@ -102,6 +107,7 @@ function rowToScheduledPost(
 function accountValues(account: InstagramAccount) {
   return {
     id: account.id,
+    campaignId: account.campaignId ?? null,
     igUserId: account.igUserId,
     username: account.username,
     profilePictureUrl: account.profilePictureUrl,
@@ -116,6 +122,7 @@ function accountValues(account: InstagramAccount) {
 function scheduledPostValues(post: ScheduledPost) {
   return {
     id: post.id,
+    campaignId: post.campaignId ?? null,
     accountId: post.accountId,
     exportId: post.exportId,
     exportName: post.exportName,
@@ -136,6 +143,7 @@ function scheduledPostPatch(
 ): Partial<typeof scheduledPostsTable.$inferInsert> {
   const set: Partial<typeof scheduledPostsTable.$inferInsert> = {};
   if (patch.accountId !== undefined) set.accountId = patch.accountId;
+  if (patch.campaignId !== undefined) set.campaignId = patch.campaignId;
   if (patch.exportId !== undefined) set.exportId = patch.exportId;
   if (patch.exportName !== undefined) set.exportName = patch.exportName;
   if (patch.caption !== undefined) set.caption = patch.caption;
@@ -154,12 +162,12 @@ function scheduledPostPatch(
   return set;
 }
 
-async function readMetaRow() {
+async function readMetaRow(campaignId: string) {
   try {
     const rows = await getDb()
       .select()
       .from(instagramMetaTable)
-      .where(eq(instagramMetaTable.id, META_ID))
+      .where(eq(instagramMetaTable.id, campaignId))
       .limit(1);
     return rows[0] ?? null;
   } catch (err) {
@@ -174,14 +182,15 @@ async function readMetaRow() {
   }
 }
 
-async function ensureMetaRow() {
-  const current = await readMetaRow();
+async function ensureMetaRow(campaignId: string) {
+  const current = await readMetaRow(campaignId);
   if (current) return current;
-  await getDb().insert(instagramMetaTable).values({ id: META_ID });
-  return (await readMetaRow())!;
+  await getDb().insert(instagramMetaTable).values({ id: campaignId });
+  return (await readMetaRow(campaignId))!;
 }
 
 async function patchMetaRow(
+  campaignId: string,
   patch: Partial<{
     publishedExportIds: string[];
     accountLastPublishedAt: Record<string, string>;
@@ -189,7 +198,7 @@ async function patchMetaRow(
     apiRateLimitedUntil: string | null;
   }>,
 ) {
-  await ensureMetaRow();
+  await ensureMetaRow(campaignId);
   const set: Partial<typeof instagramMetaTable.$inferInsert> = {};
   if (patch.publishedExportIds !== undefined) {
     set.publishedExportIds = patch.publishedExportIds;
@@ -207,49 +216,145 @@ async function patchMetaRow(
   await getDb()
     .update(instagramMetaTable)
     .set(set)
-    .where(eq(instagramMetaTable.id, META_ID));
+    .where(eq(instagramMetaTable.id, campaignId));
 }
 
-export async function readInstagramPg(): Promise<InstagramData> {
+async function accountCampaignId(accountId: string): Promise<string | null> {
+  const rows = await getDb()
+    .select({ campaignId: instagramAccountsTable.campaignId })
+    .from(instagramAccountsTable)
+    .where(eq(instagramAccountsTable.id, accountId))
+    .limit(1);
+  return rows[0]?.campaignId ?? null;
+}
+
+const scheduledPostsBaseFilter = and(
+  ne(scheduledPostsTable.source, "auto"),
+  or(
+    inArray(scheduledPostsTable.status, [
+      "scheduled",
+      "queued",
+      "publishing",
+      "failed",
+    ]),
+    and(
+      eq(scheduledPostsTable.status, "published"),
+      sql`${scheduledPostsTable.scheduledAt} >= now() - interval '90 days'`,
+    ),
+  ),
+);
+
+const scheduledPostsQuery = (campaignId?: string) => {
+  const filters = campaignId
+    ? and(eq(scheduledPostsTable.campaignId, campaignId), scheduledPostsBaseFilter)
+    : scheduledPostsBaseFilter;
+  return getDb()
+    .select()
+    .from(scheduledPostsTable)
+    .where(filters)
+    .orderBy(desc(scheduledPostsTable.createdAt));
+};
+
+function buildInstagramData(
+  campaignId: string,
+  accounts: InstagramAccount[],
+  posts: ScheduledPost[],
+  meta: Awaited<ReturnType<typeof ensureMetaRow>>,
+): InstagramData {
+  const accountIds = new Set(accounts.map((a) => a.id));
+  const scopedPosts = posts.filter(
+    (post) =>
+      post.campaignId === campaignId && accountIds.has(post.accountId),
+  );
+  const scopedGoals = Object.fromEntries(
+    Object.entries(meta.accountPostingGoals ?? {}).filter(([accountId]) =>
+      accountIds.has(accountId),
+    ),
+  );
+  const scopedLastPublished = Object.fromEntries(
+    Object.entries(meta.accountLastPublishedAt ?? {}).filter(([accountId]) =>
+      accountIds.has(accountId),
+    ),
+  );
+
+  return normalize({
+    accounts,
+    scheduledPosts: scopedPosts,
+    publishedExportIds: meta.publishedExportIds ?? [],
+    accountLastPublishedAt: scopedLastPublished,
+    accountPostingGoals: scopedGoals,
+    apiRateLimitedUntil: meta.apiRateLimitedUntil,
+  });
+}
+
+export async function readInstagramPg(
+  campaignId: string,
+): Promise<InstagramData> {
+  await repairInstagramCampaignScope();
+  const db = getDb();
+  const accounts = await dbQuery(
+    () =>
+      db
+        .select()
+        .from(instagramAccountsTable)
+        .where(eq(instagramAccountsTable.campaignId, campaignId)),
+    "read instagram accounts",
+  );
+  const posts = await dbQuery(
+    () => scheduledPostsQuery(campaignId),
+    "read instagram scheduled posts",
+  );
+  const meta = await dbQuery(
+    () => ensureMetaRow(campaignId),
+    "read instagram meta",
+  );
+
+  return buildInstagramData(
+    campaignId,
+    accounts.map(rowToAccount),
+    posts.map(rowToScheduledPost),
+    meta,
+  );
+}
+
+/** All campaigns — for publishing due posts across campaigns. */
+export async function readInstagramPgAll(): Promise<InstagramData> {
+  await repairInstagramCampaignScope();
   const db = getDb();
   const accounts = await dbQuery(
     () => db.select().from(instagramAccountsTable),
     "read instagram accounts",
   );
   const posts = await dbQuery(
-    () =>
-      db
-        .select()
-        .from(scheduledPostsTable)
-        .where(
-          and(
-            ne(scheduledPostsTable.source, "auto"),
-            or(
-              inArray(scheduledPostsTable.status, [
-                "scheduled",
-                "queued",
-                "publishing",
-                "failed",
-              ]),
-              and(
-                eq(scheduledPostsTable.status, "published"),
-                sql`${scheduledPostsTable.scheduledAt} >= now() - interval '90 days'`,
-              ),
-            ),
-          ),
-        )
-        .orderBy(desc(scheduledPostsTable.createdAt)),
+    () => scheduledPostsQuery(),
     "read instagram scheduled posts",
   );
-  const meta = await dbQuery(() => ensureMetaRow(), "read instagram meta");
+  const metaRows = await dbQuery(
+    () => db.select().from(instagramMetaTable),
+    "read instagram meta",
+  );
+
+  const mergedPublished = new Set<string>();
+  const mergedLastPublished: Record<string, string> = {};
+  const mergedGoals: Record<string, AccountPostingGoal> = {};
+  let apiRateLimitedUntil: string | null = null;
+
+  for (const meta of metaRows) {
+    for (const id of meta.publishedExportIds ?? []) mergedPublished.add(id);
+    Object.assign(mergedLastPublished, meta.accountLastPublishedAt ?? {});
+    Object.assign(mergedGoals, meta.accountPostingGoals ?? {});
+    if (meta.apiRateLimitedUntil) {
+      apiRateLimitedUntil = meta.apiRateLimitedUntil;
+    }
+  }
 
   return normalize({
     accounts: accounts.map(rowToAccount),
     scheduledPosts: posts.map(rowToScheduledPost),
-    publishedExportIds: meta.publishedExportIds ?? [],
-    accountLastPublishedAt: meta.accountLastPublishedAt ?? {},
-    accountPostingGoals: meta.accountPostingGoals ?? {},
-    apiRateLimitedUntil: meta.apiRateLimitedUntil,
+    publishedExportIds: [...mergedPublished],
+    accountLastPublishedAt: mergedLastPublished,
+    accountPostingGoals: mergedGoals,
+    apiRateLimitedUntil,
   });
 }
 
@@ -273,12 +378,34 @@ async function writeInstagramPg(data: InstagramData): Promise<void> {
       .values(normalized.scheduledPosts.map(scheduledPostValues));
   }
 
-  await patchMetaRow({
-    publishedExportIds: normalized.publishedExportIds,
-    accountLastPublishedAt: normalized.accountLastPublishedAt,
-    accountPostingGoals: normalized.accountPostingGoals ?? {},
-    apiRateLimitedUntil: normalized.apiRateLimitedUntil,
-  });
+  const campaignIds = new Set(
+    [
+      ...normalized.accounts.map((a) => a.campaignId),
+      ...normalized.scheduledPosts.map((p) => p.campaignId),
+    ].filter((id): id is string => Boolean(id)),
+  );
+
+  for (const campaignId of campaignIds) {
+    const accountIds = new Set(
+      normalized.accounts
+        .filter((a) => a.campaignId === campaignId)
+        .map((a) => a.id),
+    );
+    await patchMetaRow(campaignId, {
+      publishedExportIds: normalized.publishedExportIds,
+      accountLastPublishedAt: Object.fromEntries(
+        Object.entries(normalized.accountLastPublishedAt).filter(([id]) =>
+          accountIds.has(id),
+        ),
+      ),
+      accountPostingGoals: Object.fromEntries(
+        Object.entries(normalized.accountPostingGoals ?? {}).filter(([id]) =>
+          accountIds.has(id),
+        ),
+      ),
+      apiRateLimitedUntil: normalized.apiRateLimitedUntil,
+    });
+  }
 }
 
 export async function upsertInstagramAccountsPg(
@@ -286,10 +413,18 @@ export async function upsertInstagramAccountsPg(
 ): Promise<InstagramAccount[]> {
   const db = getDb();
   for (const account of accounts) {
+    if (!account.campaignId) {
+      throw new Error("campaignId is required when connecting Instagram.");
+    }
     const existing = await db
       .select({ id: instagramAccountsTable.id })
       .from(instagramAccountsTable)
-      .where(eq(instagramAccountsTable.igUserId, account.igUserId))
+      .where(
+        and(
+          eq(instagramAccountsTable.igUserId, account.igUserId),
+          eq(instagramAccountsTable.campaignId, account.campaignId),
+        ),
+      )
       .limit(1);
 
     if (existing[0]) {
@@ -302,20 +437,33 @@ export async function upsertInstagramAccountsPg(
     }
   }
 
-  const rows = await db.select().from(instagramAccountsTable);
+  const campaignId = accounts[0]?.campaignId;
+  if (!campaignId) return accounts;
+  const rows = await db
+    .select()
+    .from(instagramAccountsTable)
+    .where(eq(instagramAccountsTable.campaignId, campaignId));
   return rows.map(rowToAccount);
 }
 
 export async function removeInstagramAccountPg(id: string): Promise<void> {
+  const campaignId = await accountCampaignId(id);
   const db = getDb();
   await db
     .delete(instagramAccountsTable)
     .where(eq(instagramAccountsTable.id, id));
 
-  const meta = await ensureMetaRow();
-  const accountLastPublishedAt = { ...(meta.accountLastPublishedAt ?? {}) };
-  delete accountLastPublishedAt[id];
-  await patchMetaRow({ accountLastPublishedAt });
+  if (campaignId) {
+    const meta = await ensureMetaRow(campaignId);
+    const accountLastPublishedAt = { ...(meta.accountLastPublishedAt ?? {}) };
+    delete accountLastPublishedAt[id];
+    const accountPostingGoals = { ...(meta.accountPostingGoals ?? {}) };
+    delete accountPostingGoals[id];
+    await patchMetaRow(campaignId, {
+      accountLastPublishedAt,
+      accountPostingGoals,
+    });
+  }
 
   await db
     .update(scheduledPostsTable)
@@ -332,40 +480,60 @@ export async function setAccountPostingGoalPg(
   accountId: string,
   goal: AccountPostingGoal,
 ) {
-  const meta = await ensureMetaRow();
+  const campaignId = await accountCampaignId(accountId);
+  if (!campaignId) {
+    throw new Error("Instagram account not found.");
+  }
+  const meta = await ensureMetaRow(campaignId);
   const accountPostingGoals = {
     ...(meta.accountPostingGoals ?? {}),
     [accountId]: normalizePostingGoal(goal),
   };
-  await patchMetaRow({ accountPostingGoals });
+  await patchMetaRow(campaignId, { accountPostingGoals });
   return accountPostingGoals[accountId]!;
 }
 
-export async function setApiRateLimitedUntilPg(until: string | null) {
-  await patchMetaRow({ apiRateLimitedUntil: until });
+export async function setApiRateLimitedUntilPg(
+  campaignId: string,
+  until: string | null,
+) {
+  await patchMetaRow(campaignId, { apiRateLimitedUntil: until });
   return until;
 }
 
-export async function clearApiRateLimitIfExpiredPg(now = Date.now()) {
-  const meta = await ensureMetaRow();
-  if (
-    meta.apiRateLimitedUntil &&
-    new Date(meta.apiRateLimitedUntil).getTime() <= now
-  ) {
-    await patchMetaRow({ apiRateLimitedUntil: null });
-    return { ...meta, apiRateLimitedUntil: null };
+export async function setApiRateLimitedUntilPgAll(until: string | null) {
+  const rows = await getDb().select({ id: instagramMetaTable.id }).from(instagramMetaTable);
+  for (const row of rows) {
+    await patchMetaRow(row.id, { apiRateLimitedUntil: until });
   }
-  return meta;
+  return until;
+}
+
+export async function clearApiRateLimitIfExpiredPgAll(now = Date.now()) {
+  const rows = await getDb().select().from(instagramMetaTable);
+  let cleared = false;
+  for (const meta of rows) {
+    if (
+      meta.apiRateLimitedUntil &&
+      new Date(meta.apiRateLimitedUntil).getTime() <= now
+    ) {
+      await patchMetaRow(meta.id, { apiRateLimitedUntil: null });
+      cleared = true;
+    }
+  }
+  return cleared;
 }
 
 export async function recordAccountPublishedPg(
   accountId: string,
   publishedAt: string,
 ) {
-  const meta = await ensureMetaRow();
+  const campaignId = await accountCampaignId(accountId);
+  if (!campaignId) return;
+  const meta = await ensureMetaRow(campaignId);
   const prev = meta.accountLastPublishedAt?.[accountId];
   if (!prev || publishedAt > prev) {
-    await patchMetaRow({
+    await patchMetaRow(campaignId, {
       accountLastPublishedAt: {
         ...(meta.accountLastPublishedAt ?? {}),
         [accountId]: publishedAt,
@@ -413,10 +581,12 @@ export async function markExportPublishedOnAccountPg(
   accountId: string,
   exportId: string,
 ) {
-  const meta = await ensureMetaRow();
+  const campaignId = await accountCampaignId(accountId);
+  if (!campaignId) return readInstagramPgAll();
+  const meta = await ensureMetaRow(campaignId);
   const publishedExportIds = meta.publishedExportIds ?? [];
   if (!publishedExportIds.includes(exportId)) {
-    await patchMetaRow({
+    await patchMetaRow(campaignId, {
       publishedExportIds: [...publishedExportIds, exportId],
     });
   }
@@ -435,16 +605,31 @@ export async function markExportPublishedOnAccountPg(
       ),
     );
 
-  return readInstagramPg();
+  return readInstagramPg(campaignId);
 }
 
-export async function markExportPublishedPg(exportId: string) {
-  const meta = await ensureMetaRow();
-  const publishedExportIds = meta.publishedExportIds ?? [];
-  if (!publishedExportIds.includes(exportId)) {
-    await patchMetaRow({
-      publishedExportIds: [...publishedExportIds, exportId],
-    });
+export async function markExportPublishedPg(
+  exportId: string,
+  campaignId?: string | null,
+) {
+  if (campaignId) {
+    const meta = await ensureMetaRow(campaignId);
+    const publishedExportIds = meta.publishedExportIds ?? [];
+    if (!publishedExportIds.includes(exportId)) {
+      await patchMetaRow(campaignId, {
+        publishedExportIds: [...publishedExportIds, exportId],
+      });
+    }
+  } else {
+    const rows = await getDb()
+      .select({ campaignId: scheduledPostsTable.campaignId })
+      .from(scheduledPostsTable)
+      .where(eq(scheduledPostsTable.exportId, exportId))
+      .limit(1);
+    const inferred = rows[0]?.campaignId;
+    if (inferred) {
+      await markExportPublishedPg(exportId, inferred);
+    }
   }
 
   await getDb()
@@ -457,22 +642,23 @@ export async function markExportPublishedPg(exportId: string) {
       ),
     );
 
-  return readInstagramPg();
+  return campaignId ? readInstagramPg(campaignId) : readInstagramPgAll();
 }
 
-export async function removeScheduledPostPg(id: string) {
-  await getDb()
-    .delete(scheduledPostsTable)
-    .where(eq(scheduledPostsTable.id, id));
+async function purgeExportMetaForAllCampaigns(exportId: string) {
+  const metaRows = await getDb().select().from(instagramMetaTable);
+  for (const meta of metaRows) {
+    const publishedExportIds = (meta.publishedExportIds ?? []).filter(
+      (id) => id !== exportId,
+    );
+    if (publishedExportIds.length !== (meta.publishedExportIds ?? []).length) {
+      await patchMetaRow(meta.id, { publishedExportIds });
+    }
+  }
 }
 
 export async function removeExportReferencesPg(exportId: string) {
-  const meta = await ensureMetaRow();
-  await patchMetaRow({
-    publishedExportIds: (meta.publishedExportIds ?? []).filter(
-      (id) => id !== exportId,
-    ),
-  });
+  await purgeExportMetaForAllCampaigns(exportId);
 
   await getDb()
     .update(scheduledPostsTable)
@@ -491,15 +677,16 @@ export async function removeExportReferencesPg(exportId: string) {
 }
 
 export async function purgeExportFromInstagramPg(exportId: string) {
-  const meta = await ensureMetaRow();
-  await patchMetaRow({
-    publishedExportIds: (meta.publishedExportIds ?? []).filter(
-      (id) => id !== exportId,
-    ),
-  });
+  await purgeExportMetaForAllCampaigns(exportId);
   await getDb()
     .delete(scheduledPostsTable)
     .where(eq(scheduledPostsTable.exportId, exportId));
+}
+
+export async function removeScheduledPostPg(id: string) {
+  await getDb()
+    .delete(scheduledPostsTable)
+    .where(eq(scheduledPostsTable.id, id));
 }
 
 export async function writeInstagramStatePg(data: InstagramData): Promise<void> {

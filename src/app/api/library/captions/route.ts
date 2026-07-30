@@ -7,6 +7,7 @@ import {
   updateCaption,
 } from "@/lib/caption-store";
 import { DEFAULT_TEXT_OVERLAYS } from "@/lib/constants";
+import { appendCaptionsToActiveCampaign } from "@/lib/sync-campaign-assets";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
 
     if (typeof body.import === "string") {
       const result = await importCaptionLines(body.import);
+      await appendCaptionsToActiveCampaign(result.added.map((c) => c.id));
       return NextResponse.json({
         captions: result.added,
         added: result.added.length,
@@ -56,6 +58,7 @@ export async function POST(request: Request) {
     }
 
     const added = await addCaptions(texts, body.tags ?? []);
+    await appendCaptionsToActiveCampaign(added.map((c) => c.id));
     return NextResponse.json({ captions: added, added: added.length });
   } catch (err) {
     const message =

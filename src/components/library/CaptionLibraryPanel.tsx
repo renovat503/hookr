@@ -6,9 +6,18 @@ import type { LibraryCaption } from "@/lib/types";
 
 type CaptionLibraryPanelProps = {
   onChange?: (captions: LibraryCaption[]) => void;
+  onImported?: () => void;
+  /** When set, only captions in this campaign selection are shown. */
+  visibleIds?: string[] | null;
+  campaignName?: string | null;
 };
 
-export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
+export function CaptionLibraryPanel({
+  onChange,
+  onImported,
+  visibleIds = null,
+  campaignName = null,
+}: CaptionLibraryPanelProps) {
   const [captions, setCaptions] = useState<LibraryCaption[]>([]);
   const [importText, setImportText] = useState("");
   const [aiTheme, setAiTheme] = useState("");
@@ -28,7 +37,12 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
       const res = await fetch("/api/library/captions");
       if (!res.ok) throw new Error("Could not load captions.");
       const json = (await res.json()) as { captions: LibraryCaption[] };
-      const next = json.captions ?? [];
+      const all = json.captions ?? [];
+      const visibleSet =
+        visibleIds != null ? new Set(visibleIds) : null;
+      const next = visibleSet
+        ? all.filter((c) => visibleSet.has(c.id))
+        : all;
       setCaptions(next);
       onChange?.(next);
     } catch (err) {
@@ -36,7 +50,7 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [onChange]);
+  }, [onChange, visibleIds]);
 
   useEffect(() => {
     void load();
@@ -55,6 +69,7 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error || "Import failed.");
       setImportText("");
+      onImported?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed.");
@@ -78,6 +93,7 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error || "AI generation failed.");
+      onImported?.();
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI generation failed.");
@@ -159,8 +175,21 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
       )}
 
       <p className="max-w-2xl text-sm text-muted">
-        Import hook lines for on-video captions. Used by Produce when &quot;Burn
-        captions&quot; is enabled.
+        {campaignName ? (
+          <>
+            Captions selected for{" "}
+            <span className="font-medium text-foreground">{campaignName}</span>.
+            Import or generate lines below to add them to this campaign. Used by
+            Produce when &quot;Burn captions&quot; is enabled in campaign
+            settings.
+          </>
+        ) : (
+          <>
+            Import hook lines for on-video captions. Select a campaign to scope
+            captions per campaign. Used by Produce when &quot;Burn captions&quot;
+            is enabled.
+          </>
+        )}
       </p>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -307,10 +336,13 @@ export function CaptionLibraryPanel({ onChange }: CaptionLibraryPanelProps) {
       ) : (
         <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border py-16 text-muted">
           <Sparkles className="h-10 w-10 opacity-30" />
-          <p className="text-sm font-medium text-foreground/80">No captions yet</p>
+          <p className="text-sm font-medium text-foreground/80">
+            {campaignName ? "No captions for this campaign" : "No captions yet"}
+          </p>
           <p className="max-w-xs text-center text-xs">
-            Paste hook lines above — one per line — or generate more from examples
-            with AI.
+            {campaignName
+              ? "Import hook lines above or select captions in Campaign settings."
+              : "Paste hook lines above — one per line — or generate more from examples with AI."}
           </p>
         </div>
       )}

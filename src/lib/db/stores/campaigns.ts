@@ -20,6 +20,7 @@ function rowToCampaign(row: typeof campaignsTable.$inferSelect): Campaign {
     randomFormat: row.randomFormat,
     borrowFromCampaignId: row.borrowFromCampaignId,
     borrowAssetKind: row.borrowAssetKind,
+    copiedFromCampaignId: row.copiedFromCampaignId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -75,6 +76,7 @@ export async function addCampaignPg(campaign: Campaign): Promise<Campaign> {
     randomFormat: next.randomFormat,
     borrowFromCampaignId: next.borrowFromCampaignId,
     borrowAssetKind: next.borrowAssetKind,
+    copiedFromCampaignId: next.copiedFromCampaignId,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt,
   });
@@ -103,6 +105,10 @@ export async function updateCampaignPg(
       patch.borrowAssetKind !== undefined
         ? patch.borrowAssetKind
         : current.borrowAssetKind ?? null,
+    copiedFromCampaignId:
+      patch.copiedFromCampaignId !== undefined
+        ? patch.copiedFromCampaignId
+        : current.copiedFromCampaignId ?? null,
     status:
       patch.status === "closed" || patch.status === "open"
         ? patch.status
@@ -125,6 +131,7 @@ export async function updateCampaignPg(
       randomFormat: next.randomFormat,
       borrowFromCampaignId: next.borrowFromCampaignId,
       borrowAssetKind: next.borrowAssetKind,
+      copiedFromCampaignId: next.copiedFromCampaignId,
       updatedAt: next.updatedAt,
     })
     .where(eq(campaignsTable.id, id));
@@ -174,6 +181,7 @@ export async function writeCampaignsPg(data: CampaignsData): Promise<void> {
         randomFormat: next.randomFormat,
         borrowFromCampaignId: next.borrowFromCampaignId,
         borrowAssetKind: next.borrowAssetKind,
+        copiedFromCampaignId: next.copiedFromCampaignId,
         createdAt: next.createdAt,
         updatedAt: next.updatedAt,
       };

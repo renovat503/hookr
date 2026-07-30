@@ -104,7 +104,9 @@ export async function exportLibraryVideo(
   let compressedTemp: string | null = null;
 
   try {
-    const library = await readLibrary("produce");
+    const library = await readLibrary("produce", {
+      campaignId: body.campaignId ?? undefined,
+    });
     const hookMeta = body.hookId
       ? library.hooks.find((h) => h.id === body.hookId)
       : undefined;

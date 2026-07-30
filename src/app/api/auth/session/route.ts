@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import {
-  CAMPAIGN_COOKIE,
-  SESSION_COOKIE,
-  verifySessionToken,
-} from "@/lib/auth-session";
-import { getCampaign } from "@/lib/campaign-store";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth-session";
+import { resolveActiveCampaign } from "@/lib/active-campaign";
 import { formatPgError } from "@/lib/db/connection-url";
 
 export async function GET() {
@@ -16,8 +12,7 @@ export async function GET() {
       return NextResponse.json({ authenticated: false });
     }
 
-    const activeId = jar.get(CAMPAIGN_COOKIE)?.value ?? null;
-    const activeCampaign = activeId ? await getCampaign(activeId) : null;
+    const activeCampaign = await resolveActiveCampaign();
 
     return NextResponse.json({
       authenticated: true,

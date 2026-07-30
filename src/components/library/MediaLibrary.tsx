@@ -135,7 +135,6 @@ export function MediaLibrary({
   const [savingMotionHookId, setSavingMotionHookId] = useState<string | null>(
     null,
   );
-  const [captionCount, setCaptionCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const hookFileRef = useRef<HTMLInputElement>(null);
   const musicFileRef = useRef<HTMLInputElement>(null);
@@ -177,12 +176,13 @@ export function MediaLibrary({
         ? `/api/library?scope=assets&campaignId=${encodeURIComponent(activeId)}`
         : "/api/library?scope=assets";
 
-      const [libRes, expRes, capRes] = await Promise.all([
+      const exportsUrl = activeId
+        ? `/api/library?scope=exports&campaignId=${encodeURIComponent(activeId)}`
+        : "/api/library?scope=exports";
+
+      const [libRes, expRes] = await Promise.all([
         fetch(assetsUrl, { signal: AbortSignal.timeout(35_000) }),
-        fetch("/api/library?scope=exports", {
-          signal: AbortSignal.timeout(35_000),
-        }),
-        fetch("/api/library/captions", {
+        fetch(exportsUrl, {
           signal: AbortSignal.timeout(35_000),
         }),
       ]);
@@ -196,13 +196,6 @@ export function MediaLibrary({
       if (expRes.ok) {
         const expJson = (await expRes.json()) as LibraryData;
         setExports(expJson.exports ?? []);
-      }
-      if (capRes.ok) {
-        const capJson = (await capRes.json()) as {
-          count?: number;
-          captions?: unknown[];
-        };
-        setCaptionCount(capJson.count ?? capJson.captions?.length ?? 0);
       }
     } catch (err) {
       setError(friendlyFetchError(err, "Load failed."));
@@ -565,13 +558,20 @@ export function MediaLibrary({
       (h) => h.campaignId === activeCampaign?.id && isCompleteHook(h),
     ) ?? [];
 
+  const campaignDemoIds = new Set(activeCampaign?.demoIds ?? []);
+  const campaignDemos =
+    data?.demos.filter((demo) => campaignDemoIds.has(demo.id)) ?? [];
+
+  const campaignCaptionIds = activeCampaign?.captionIds ?? [];
+  const campaignCaptionCount = campaignCaptionIds.length;
+
   const counts = {
     hooks: campaignHooks.length,
-    demos: data?.demos.length ?? 0,
+    demos: campaignDemos.length,
     exports: exports.length,
     motions: data?.motions?.length ?? 0,
     music: data?.music.length ?? 0,
-    captions: captionCount,
+    captions: campaignCaptionCount,
   };
 
   const visibleTabs = showCaptionsTab
@@ -640,7 +640,7 @@ export function MediaLibrary({
               <span className="font-medium text-foreground">
                 {activeCampaign.name}
               </span>
-              . Hooks from other campaigns are hidden unless copied here.
+              . Hooks from other campaigns are hidden.
             </p>
           ) : (
             <p className="rounded-xl border border-border-subtle bg-surface-raised/40 px-4 py-3 text-xs text-muted">
@@ -750,12 +750,28 @@ export function MediaLibrary({
           <EmptyState
             icon={Sparkles}
             title="No hooks yet"
-            hint="Generate a hook in Create, or upload a finished clip with overlay already burned in."
+            hint="Generate a hook in Create, or upload a finished clip in Library."
           />
         )}
         </div>
       ) : tab === "demos" ? (
         <div className="space-y-4">
+          {activeCampaign ? (
+            <p className="text-xs text-muted">
+              Showing demos selected for{" "}
+              <span className="font-medium text-foreground">
+                {activeCampaign.name}
+              </span>
+              . Upload a demo to add it to this campaign.
+            </p>
+          ) : (
+            <p className="rounded-xl border border-border-subtle bg-surface-raised/40 px-4 py-3 text-xs text-muted">
+              Select a campaign to view and upload demos.{" "}
+              <a href="/campaigns" className="text-accent hover:underline">
+                Choose campaign →
+              </a>
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-end gap-2">
             <input
               ref={fileRef}
@@ -778,9 +794,9 @@ export function MediaLibrary({
             <p className="text-sm text-muted">{demoUploadNote}</p>
           ) : null}
 
-          {data?.demos.length ? (
+          {campaignDemos.length ? (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {data.demos.map((demo) => (
+            {campaignDemos.map((demo) => (
               <li
                 key={demo.id}
                 className="overflow-hidden rounded-2xl border border-border bg-surface/70"
@@ -822,8 +838,8 @@ export function MediaLibrary({
         ) : (
           <EmptyState
             icon={Upload}
-            title="No demo clips yet"
-            hint="Upload product recordings with the button above."
+            title="No demos for this campaign"
+            hint="Upload a product recording above, or select demos in Campaign settings."
           />
         )}
         </div>
@@ -981,17 +997,29 @@ export function MediaLibrary({
         </div>
       ) : tab === "captions" ? (
         <CaptionLibraryPanel
-          onChange={(captions) => setCaptionCount(captions.length)}
+          visibleIds={activeCampaign ? activeCampaign.captionIds : null}
+          campaignName={activeCampaign?.name ?? null}
+          onImported={() => void load()}
         />
       ) : tab === "exports" ? (
         <div className="space-y-4">
-          <p className="text-xs text-muted">
-            Finished hook + demo videos from Produce. Schedule them on the{" "}
-            <a href="/instagram" className="text-accent hover:underline">
-              Instagram
-            </a>{" "}
-            page.
-          </p>
+          {activeCampaign ? (
+            <p className="text-xs text-muted">
+              Finished videos for{" "}
+              <span className="font-medium text-foreground">
+                {activeCampaign.name}
+              </span>
+              . Schedule them on the{" "}
+              <a href="/instagram" className="text-accent hover:underline">
+                Instagram
+              </a>{" "}
+              page.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Select a campaign to view its finished exports.
+            </p>
+          )}
           {exports.length ? (
             <>
               <div className="space-y-2 rounded-xl border border-border bg-surface-raised/60 px-3 py-2.5">

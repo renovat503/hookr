@@ -12,11 +12,7 @@ import type {
   LibraryData,
 } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
-import { mergeCampaignAssets, resolveBorrowSource } from "@/lib/campaign-assets";
-import {
-  hookCopyLabel,
-  hooksOwnedByCampaign,
-} from "@/lib/campaign-hooks";
+import { hooksOwnedByCampaign, hookCopyLabel } from "@/lib/campaign-hooks";
 import { isCompleteHook, cn } from "@/lib/utils";
 import { DEFAULT_MUSIC_VOLUME } from "@/lib/constants";
 
@@ -35,20 +31,11 @@ export function CampaignSettings() {
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
   const [randomFormat, setRandomFormat] = useState(true);
   const [status, setStatus] = useState<CampaignStatus>("open");
-  const [borrowFromCampaignId, setBorrowFromCampaignId] = useState<string | null>(
-    null,
-  );
-  const [borrowAssetKind, setBorrowAssetKind] = useState<
-    "hooks" | "demos" | null
-  >(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [copySourceId, setCopySourceId] = useState("");
-  const [copyHookIds, setCopyHookIds] = useState<string[]>([]);
-  const [copyingHooks, setCopyingHooks] = useState(false);
 
   const applyCampaign = useCallback((c: Campaign) => {
     setCampaign(c);
@@ -60,8 +47,6 @@ export function CampaignSettings() {
     setMusicId(c.musicId);
     setMusicVolume(c.musicVolume);
     setRandomFormat(c.randomFormat);
-    setBorrowFromCampaignId(c.borrowFromCampaignId ?? null);
-    setBorrowAssetKind(c.borrowAssetKind ?? null);
     setStatus(c.status ?? "open");
   }, []);
 
@@ -115,22 +100,6 @@ export function CampaignSettings() {
     void load();
   }, [load]);
 
-  const setBorrowLink = (kind: "hooks" | "demos" | null, sourceId: string | null) => {
-    setSaved(false);
-    if (!kind || !sourceId) {
-      setBorrowFromCampaignId(null);
-      setBorrowAssetKind(null);
-      return;
-    }
-    setBorrowFromCampaignId(sourceId);
-    setBorrowAssetKind(kind);
-    if (kind === "hooks") {
-      setHookIds([]);
-    } else {
-      setDemoIds([]);
-    }
-  };
-
   const toggle = (id: string, list: string[], set: (v: string[]) => void) => {
     setSaved(false);
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -142,22 +111,18 @@ export function CampaignSettings() {
     setError(null);
     setSaved(false);
     try {
-      const ownedHookIds = borrowAssetKind === "hooks" ? [] : hookIds;
-      const ownedDemoIds = borrowAssetKind === "demos" ? [] : demoIds;
       const res = await fetch(`/api/campaigns/${campaign.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          hookIds: ownedHookIds,
-          demoIds: ownedDemoIds,
+          hookIds,
+          demoIds,
           captionIds: useCaptions ? captionIds : [],
           useCaptions,
           audioMode,
           musicId: audioMode === "none" ? null : musicId,
           musicVolume,
           randomFormat,
-          borrowFromCampaignId,
-          borrowAssetKind,
           status,
         }),
       });
@@ -219,53 +184,14 @@ export function CampaignSettings() {
     );
   }
 
-  const otherCampaigns = campaigns.filter((c) => c.id !== campaign.id);
-  const campaignForMerge: Campaign = {
-    ...campaign,
-    hookIds,
-    demoIds,
-    borrowFromCampaignId,
-    borrowAssetKind,
-  };
-  const borrowSource = resolveBorrowSource(campaignForMerge, campaigns);
-  const mergedAssets = library
-    ? mergeCampaignAssets(campaignForMerge, library, campaigns)
-    : null;
-  const hooksBorrowed = borrowAssetKind === "hooks" && Boolean(borrowSource);
-  const demosBorrowed = borrowAssetKind === "demos" && Boolean(borrowSource);
   const ownedHooks =
     library && campaign
       ? hooksOwnedByCampaign(campaign.id, library).filter(isCompleteHook)
       : [];
-  const copySourceHooks =
-    library && copySourceId
-      ? hooksOwnedByCampaign(copySourceId, library).filter(isCompleteHook)
-      : [];
-
-  const copyHooksFromCampaign = async () => {
-    if (!copySourceId || !copyHookIds.length) return;
-    setCopyingHooks(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/library/hooks/copy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceCampaignId: copySourceId,
-          hookIds: copyHookIds,
-        }),
-      });
-      const json = (await res.json()) as { error?: string; copiedIds?: string[] };
-      if (!res.ok) throw new Error(json.error || "Could not copy hooks.");
-      setCopyHookIds([]);
-      setSaved(false);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not copy hooks.");
-    } finally {
-      setCopyingHooks(false);
-    }
-  };
+  const campaignDemos = (library?.demos ?? []).filter((demo) =>
+    demoIds.includes(demo.id),
+  );
+  const allDemos = library?.demos ?? [];
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -281,6 +207,14 @@ export function CampaignSettings() {
             Choose which assets and audio to use when producing videos for this
             campaign.
           </p>
+          {campaign.copiedFromCampaignId ? (
+            <p className="mt-2 text-xs text-muted">
+              Duplicated from{" "}
+              {campaigns.find((c) => c.id === campaign.copiedFromCampaignId)?.name ??
+                "another campaign"}
+              .
+            </p>
+          ) : null}
         </div>
         <Link
           href="/campaigns"
@@ -336,138 +270,6 @@ export function CampaignSettings() {
         ) : null}
       </div>
 
-      {otherCampaigns.length > 0 && (
-        <div className="rounded-xl border border-border-subtle bg-surface-raised/40 p-4 space-y-4">
-          <div>
-            <p className="text-sm font-medium">Reuse assets from another campaign</p>
-            <p className="mt-1 text-xs text-muted">
-              Link hooks or demos from one other campaign — not both. Your
-              campaign keeps its own selection for the other asset type.
-            </p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted">
-                Reuse hooks from
-              </label>
-              <select
-                value={hooksBorrowed ? borrowFromCampaignId ?? "" : ""}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  if (id) setBorrowLink("hooks", id);
-                  else if (hooksBorrowed) setBorrowLink(null, null);
-                }}
-                className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm"
-              >
-                <option value="">None — pick hooks below</option>
-                {otherCampaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted">
-                Reuse demos from
-              </label>
-              <select
-                value={demosBorrowed ? borrowFromCampaignId ?? "" : ""}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  if (id) setBorrowLink("demos", id);
-                  else if (demosBorrowed) setBorrowLink(null, null);
-                }}
-                className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm"
-              >
-                <option value="">None — pick demos below</option>
-                {otherCampaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {borrowSource ? (
-            <p className="text-xs text-accent">
-              {hooksBorrowed
-                ? `Hooks mirror “${borrowSource.name}” — choose demos for this campaign below.`
-                : `Demos mirror “${borrowSource.name}” — choose hooks for this campaign below.`}
-            </p>
-          ) : null}
-        </div>
-      )}
-
-      {!hooksBorrowed && otherCampaigns.length > 0 ? (
-        <div className="rounded-xl border border-border-subtle bg-surface-raised/40 p-4 space-y-3">
-          <div>
-            <p className="text-sm font-medium">Copy hooks from another campaign</p>
-            <p className="mt-1 text-xs text-muted">
-              Hooks belong to one campaign. Copy them here to reuse — copies are
-              labeled in your hook list.
-            </p>
-          </div>
-          <select
-            value={copySourceId}
-            onChange={(e) => {
-              setCopySourceId(e.target.value);
-              setCopyHookIds([]);
-            }}
-            className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm"
-          >
-            <option value="">Select a campaign…</option>
-            {otherCampaigns.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          {copySourceId && copySourceHooks.length > 0 ? (
-            <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-border-subtle bg-background/50 p-2">
-              {copySourceHooks.map((hook) => (
-                <li key={hook.id}>
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface-hover">
-                    <input
-                      type="checkbox"
-                      checked={copyHookIds.includes(hook.id)}
-                      onChange={() =>
-                        setCopyHookIds((current) =>
-                          current.includes(hook.id)
-                            ? current.filter((id) => id !== hook.id)
-                            : [...current, hook.id],
-                        )
-                      }
-                      className="mt-0.5"
-                    />
-                    <span className="min-w-0">
-                      <span className="line-clamp-2 block">
-                        {hook.overlayText || hook.actionPrompt || hook.id}
-                      </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          ) : copySourceId ? (
-            <p className="text-xs text-muted">No complete hooks in that campaign.</p>
-          ) : null}
-          {copySourceId && copyHookIds.length > 0 ? (
-            <button
-              type="button"
-              disabled={copyingHooks}
-              onClick={() => void copyHooksFromCampaign()}
-              className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
-            >
-              {copyingHooks ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : null}
-              Copy {copyHookIds.length} hook{copyHookIds.length === 1 ? "" : "s"} here
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
       <AssetPicker
         title="Hooks"
         emptyHint={
@@ -480,7 +282,7 @@ export function CampaignSettings() {
             <Link href="/library" className="text-accent hover:underline">
               upload in Library
             </Link>
-            , or copy hooks from another campaign above.
+            .
           </>
         }
         items={ownedHooks.map((h) => ({
@@ -488,46 +290,36 @@ export function CampaignSettings() {
           label: h.overlayText || h.actionPrompt || h.id,
           badge: hookCopyLabel(h, campaigns) ?? undefined,
         }))}
-        selected={
-          hooksBorrowed && mergedAssets ? mergedAssets.hookIds : hookIds
-        }
+        selected={hookIds}
         onToggle={(id) => toggle(id, hookIds, setHookIds)}
         onSelectAll={setHookIds}
-        disabled={hooksBorrowed}
-        disabledHint={
-          borrowSource
-            ? `Using hooks from “${borrowSource.name}”. Clear “Reuse hooks from” above to pick your own.`
-            : undefined
-        }
       />
 
       <AssetPicker
         title="Demos"
         emptyHint={
           <>
-            No demos yet.{" "}
+            No demos selected for this campaign yet.{" "}
             <Link href="/library?tab=demos" className="text-accent hover:underline">
               Upload in Library
-            </Link>
-            .
+            </Link>{" "}
+            or select from your uploaded demos below.
           </>
         }
-        items={(library?.demos ?? []).map((d) => ({
+        items={allDemos.map((d) => ({
           id: d.id,
           label: d.name,
         }))}
-        selected={
-          demosBorrowed && mergedAssets ? mergedAssets.demoIds : demoIds
-        }
+        selected={demoIds}
         onToggle={(id) => toggle(id, demoIds, setDemoIds)}
         onSelectAll={setDemoIds}
-        disabled={demosBorrowed}
-        disabledHint={
-          borrowSource
-            ? `Using demos from “${borrowSource.name}”. Clear “Reuse demos from” above to pick your own.`
-            : undefined
-        }
       />
+      {demoIds.length > 0 && campaignDemos.length !== demoIds.length ? (
+        <p className="text-xs text-muted">
+          Some selected demos are missing from the library and will be ignored
+          until re-uploaded.
+        </p>
+      ) : null}
 
       <div className="space-y-3">
         <label className="flex items-center gap-2 text-sm">

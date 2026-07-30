@@ -69,3 +69,28 @@ export async function appendAssetToActiveCampaign(
     demoIds: [...campaign.demoIds, assetId],
   });
 }
+
+/** Add newly imported or generated captions to the active campaign's selection. */
+export async function appendCaptionsToActiveCampaign(
+  captionIds: string[],
+): Promise<void> {
+  const campaignId = await getActiveCampaignId();
+  if (!campaignId || !captionIds.length) return;
+
+  const campaign = await getCampaign(campaignId);
+  if (!campaign) return;
+
+  const next = [...campaign.captionIds];
+  let changed = false;
+  for (const id of captionIds) {
+    if (!next.includes(id)) {
+      next.push(id);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+
+  await updateCampaign(campaignId, {
+    captionIds: next,
+  });
+}

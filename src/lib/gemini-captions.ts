@@ -5,7 +5,7 @@ export async function generateCaptionsFromLibrary(options: {
   count: number;
   theme?: string;
   saveToLibrary?: boolean;
-}): Promise<{ captions: string[]; saved: number }> {
+}): Promise<{ captions: string[]; saved: number; addedIds: string[] }> {
   const count = Math.min(50, Math.max(1, Math.round(options.count)));
   const library = await readCaptions();
   const examples = library.slice(0, 40).map((c) => c.text);
@@ -64,12 +64,14 @@ export async function generateCaptionsFromLibrary(options: {
   }
 
   let saved = 0;
+  let addedIds: string[] = [];
   if (options.saveToLibrary) {
     const added = await addCaptions(unique);
     saved = added.length;
+    addedIds = added.map((c) => c.id);
   }
 
-  return { captions: unique, saved };
+  return { captions: unique, saved, addedIds };
 }
 
 /** Short hook-line suggestions for Create (works with or without a caption library). */

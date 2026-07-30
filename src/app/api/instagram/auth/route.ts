@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { isSecureRequest } from "@/lib/auth-session";
+import { getActiveCampaignId } from "@/lib/active-campaign";
+import { isSecureRequest, campaignCookieOptions, IG_OAUTH_CAMPAIGN_COOKIE } from "@/lib/auth-session";
 import {
   buildInstagramAuthUrl,
   getInstagramConfig,
@@ -20,6 +21,14 @@ export async function GET(request: Request) {
     );
   }
 
+  const campaignId = await getActiveCampaignId();
+  if (!campaignId) {
+    return NextResponse.json(
+      { error: "Select a campaign before connecting Instagram." },
+      { status: 400 },
+    );
+  }
+
   const state = randomBytes(16).toString("hex");
   const url = buildInstagramAuthUrl(state, config.redirectUri);
   const secure = isSecureRequest(request);
@@ -31,5 +40,10 @@ export async function GET(request: Request) {
     path: "/",
     maxAge: 60 * 10,
   });
+  response.cookies.set(
+    IG_OAUTH_CAMPAIGN_COOKIE,
+    campaignId,
+    campaignCookieOptions(secure),
+  );
   return response;
 }

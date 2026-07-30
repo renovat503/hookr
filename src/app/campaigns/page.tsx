@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FolderKanban, Loader2, LogOut, Plus, Trash2 } from "lucide-react";
+import { FolderKanban, Loader2, LogOut, Copy, Plus, Trash2 } from "lucide-react";
 import type { Campaign } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { cn, friendlyFetchError } from "@/lib/utils";
@@ -17,6 +17,7 @@ function CampaignsContent() {
   const [loading, setLoading] = useState(true);
   const [activating, setActivating] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -62,6 +63,38 @@ function CampaignsContent() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
     router.refresh();
+  };
+
+  const duplicateCampaign = async (id: string, name: string) => {
+    if (
+      !window.confirm(
+        `Duplicate “${name}”? Hooks, demo selection, captions, and audio settings will be copied. Exports stay empty in the new campaign.`,
+      )
+    ) {
+      return;
+    }
+
+    setDuplicatingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error || "Could not duplicate campaign.");
+      }
+      router.push("/campaign/settings");
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not duplicate campaign.",
+      );
+    } finally {
+      setDuplicatingId(null);
+    }
   };
 
   const deleteCampaign = async (id: string, name: string) => {
@@ -207,7 +240,20 @@ function CampaignsContent() {
               </button>
               <button
                 type="button"
-                disabled={deletingId === c.id || activating === c.id}
+                disabled={duplicatingId === c.id || deletingId === c.id || activating === c.id}
+                onClick={() => void duplicateCampaign(c.id, c.name)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50"
+              >
+                {duplicatingId === c.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                Duplicate
+              </button>
+              <button
+                type="button"
+                disabled={deletingId === c.id || activating === c.id || duplicatingId === c.id}
                 onClick={() => void deleteCampaign(c.id, c.name)}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-sm text-muted hover:border-red-500/30 hover:text-red-400 disabled:opacity-50"
               >

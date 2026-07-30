@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import { validateScheduleInstant } from "@/lib/calendar-utils";
 import {
   addScheduledPost,
@@ -20,7 +21,8 @@ type ScheduleBody = {
 };
 
 export async function GET() {
-  const data = await readInstagram();
+  const campaignId = await getActiveCampaignId();
+  const data = await readInstagram(campaignId);
   return NextResponse.json({ scheduledPosts: data.scheduledPosts });
 }
 
@@ -39,7 +41,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const instagram = await readInstagram();
+    const campaignId = await getActiveCampaignId();
+    const instagram = await readInstagram(campaignId);
     const account = instagram.accounts.find((a) => a.id === accountId);
     if (!account) {
       return NextResponse.json(
@@ -69,7 +72,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const library = await readLibrary("exports");
+    const library = await readLibrary("exports", { campaignId });
     const exp = library.exports.find((e) => e.id === exportId);
     if (!exp) {
       return NextResponse.json(
@@ -99,6 +102,7 @@ export async function POST(request: Request) {
 
     const post: ScheduledPost = {
       id: `sched-${Date.now()}`,
+      campaignId,
       accountId,
       exportId,
       exportName: exp.name,

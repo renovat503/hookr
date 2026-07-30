@@ -14,7 +14,7 @@ import { purgePublishedExport } from "@/lib/purge-published-export";
 import {
   isExportPublishedOnAccount,
   purgeExportFromInstagram,
-  readInstagram,
+  readInstagramAll,
   recordAccountPublished,
   removeScheduledPost,
   setApiRateLimitedUntil,
@@ -140,7 +140,7 @@ export async function processInstagramDue(options?: {
 
   processing = true;
   try {
-    const instagram = await readInstagram();
+    const instagram = await readInstagramAll();
     if (isInstagramRateLimited(instagram.apiRateLimitedUntil)) {
       return {
         processed: 0,

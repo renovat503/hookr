@@ -8,16 +8,17 @@ import {
 import {
   addScheduledPostPg,
   addScheduledPostsPg,
-  clearApiRateLimitIfExpiredPg,
+  clearApiRateLimitIfExpiredPgAll,
   markExportPublishedPg,
   markExportPublishedOnAccountPg,
   readInstagramPg,
+  readInstagramPgAll,
   recordAccountPublishedPg,
   removeExportReferencesPg,
   purgeExportFromInstagramPg,
   removeInstagramAccountPg,
   removeScheduledPostPg,
-  setApiRateLimitedUntilPg,
+  setApiRateLimitedUntilPgAll,
   setAccountPostingGoalPg,
   updateScheduledPostPg,
   upsertInstagramAccountsPg,
@@ -111,12 +112,57 @@ async function syncInstagram(data: InstagramData) {
   return normalized;
 }
 
-export async function readInstagram(): Promise<InstagramData> {
+function filterInstagramByCampaign(
+  data: InstagramData,
+  campaignId: string,
+): InstagramData {
+  const accounts = data.accounts.filter((a) => a.campaignId === campaignId);
+  const accountIds = new Set(accounts.map((a) => a.id));
+  return normalize({
+    accounts,
+    scheduledPosts: data.scheduledPosts.filter(
+      (post) => post.campaignId === campaignId && accountIds.has(post.accountId),
+    ),
+    publishedExportIds: data.publishedExportIds,
+    accountLastPublishedAt: Object.fromEntries(
+      Object.entries(data.accountLastPublishedAt).filter(([id]) =>
+        accountIds.has(id),
+      ),
+    ),
+    accountPostingGoals: Object.fromEntries(
+      Object.entries(data.accountPostingGoals ?? {}).filter(([id]) =>
+        accountIds.has(id),
+      ),
+    ),
+    apiRateLimitedUntil: data.apiRateLimitedUntil,
+  });
+}
+
+export async function readInstagram(
+  campaignId?: string | null,
+): Promise<InstagramData> {
+  if (!campaignId) {
+    return normalize({});
+  }
   if (usesPostgresRead()) {
     try {
-      return await readInstagramPg();
+      return await readInstagramPg(campaignId);
     } catch (err) {
       console.error("[instagram] postgres read failed, falling back to json", err);
+      if (!usesJsonWrite()) throw err;
+    }
+  }
+  const data = await readInstagramJson();
+  return filterInstagramByCampaign(data, campaignId);
+}
+
+/** Cross-campaign read for background publishing. */
+export async function readInstagramAll(): Promise<InstagramData> {
+  if (usesPostgresRead()) {
+    try {
+      return await readInstagramPgAll();
+    } catch (err) {
+      console.error("[instagram] postgres read all failed, falling back to json", err);
       if (!usesJsonWrite()) throw err;
     }
   }
@@ -144,12 +190,16 @@ export async function upsertInstagramAccounts(accounts: InstagramAccount[]) {
 
   const data = await readInstagramJson();
   for (const account of accounts) {
-    const idx = data.accounts.findIndex((a) => a.igUserId === account.igUserId);
+    const idx = data.accounts.findIndex(
+      (a) =>
+        a.igUserId === account.igUserId &&
+        a.campaignId === account.campaignId,
+    );
     if (idx >= 0) data.accounts[idx] = account;
     else data.accounts.unshift(account);
   }
   await syncInstagram(data);
-  return data.accounts;
+  return accounts;
 }
 
 export async function removeInstagramAccount(id: string) {
@@ -205,7 +255,7 @@ export async function setAccountPostingGoal(
 export async function setApiRateLimitedUntil(until: string | null) {
   if (usesPostgresWrite()) {
     try {
-      return await setApiRateLimitedUntilPg(until);
+      return await setApiRateLimitedUntilPgAll(until);
     } catch (err) {
       console.error("[instagram] postgres rate limit failed", err);
       if (!usesJsonWrite()) throw err;
@@ -220,7 +270,7 @@ export async function setApiRateLimitedUntil(until: string | null) {
 export async function clearApiRateLimitIfExpired(now = Date.now()) {
   if (usesPostgresWrite()) {
     try {
-      return await clearApiRateLimitIfExpiredPg(now);
+      await clearApiRateLimitIfExpiredPgAll(now);
     } catch (err) {
       console.error("[instagram] postgres clear rate limit failed", err);
       if (!usesJsonWrite()) throw err;
@@ -313,8 +363,9 @@ export async function updateScheduledPost(
 export async function reorderAccountQueue(
   accountId: string,
   orderedIds: string[],
+  campaignId: string,
 ) {
-  const data = await readInstagram();
+  const data = await readInstagram(campaignId);
   const queue = getAccountQueuePosts(data, accountId);
   const queueIds = new Set(queue.map((post) => post.id));
   if (

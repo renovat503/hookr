@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import {
   ExportDuplicateError,
   exportLibraryVideo,
@@ -32,7 +33,8 @@ type ExportBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ExportBody;
-    const exp = await exportLibraryVideo(body);
+    const campaignId = body.campaignId ?? (await getActiveCampaignId());
+    const exp = await exportLibraryVideo({ ...body, campaignId });
     return NextResponse.json(exp);
   } catch (err) {
     if (err instanceof ExportDuplicateError) {

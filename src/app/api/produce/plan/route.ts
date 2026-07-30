@@ -23,7 +23,9 @@ export async function POST(request: Request) {
       maxCount?: number;
     };
 
-    const library = await readLibrary("produce");
+    const library = await readLibrary("produce", {
+      campaignId: body.campaignId ?? undefined,
+    });
     const captions = await readCaptions();
     const allCampaigns = (await readCampaigns()).campaigns;
 
@@ -56,6 +58,8 @@ export async function POST(request: Request) {
       captionTexts = captions
         .filter((c) => body.captionIds!.includes(c.id))
         .map((c) => c.text);
+    } else if (campaign) {
+      captionTexts = [];
     } else {
       captionTexts = captions.map((c) => c.text);
     }

@@ -6,6 +6,7 @@ import {
   getInstagramConfig,
 } from "@/lib/instagram";
 import { upsertInstagramAccounts } from "@/lib/instagram-store";
+import { IG_OAUTH_CAMPAIGN_COOKIE } from "@/lib/auth-session";
 import type { InstagramAccount } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,11 +35,20 @@ export async function GET(request: Request) {
 
   const cookieHeader = request.headers.get("cookie") || "";
   const expected = readRequestCookie(cookieHeader, "ig_oauth_state");
+  const campaignId = readRequestCookie(cookieHeader, IG_OAUTH_CAMPAIGN_COOKIE);
   const redirectUri = config.redirectUri;
 
   if (!expected || expected !== state) {
     return NextResponse.redirect(
       `${redirectBase}?error=${encodeURIComponent("Invalid OAuth state.")}`,
+    );
+  }
+
+  if (!campaignId) {
+    return NextResponse.redirect(
+      `${redirectBase}?error=${encodeURIComponent(
+        "Select a campaign before connecting Instagram.",
+      )}`,
     );
   }
 
@@ -57,7 +67,8 @@ export async function GET(request: Request) {
 
     const now = Date.now();
     const accounts: InstagramAccount[] = discovered.map((item) => ({
-      id: `ig-${item.igUserId}`,
+      id: `ig-${campaignId}-${item.igUserId}`,
+      campaignId,
       igUserId: item.igUserId,
       username: item.username,
       profilePictureUrl: item.profilePictureUrl,
@@ -74,6 +85,7 @@ export async function GET(request: Request) {
       `${redirectBase}?connected=${accounts.length}`,
     );
     response.cookies.set("ig_oauth_state", "", { path: "/", maxAge: 0 });
+    response.cookies.set(IG_OAUTH_CAMPAIGN_COOKIE, "", { path: "/", maxAge: 0 });
     return response;
   } catch (err) {
     const message =

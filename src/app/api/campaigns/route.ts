@@ -6,6 +6,7 @@ import {
   clearSessionCookieOptions,
   isSecureRequest,
 } from "@/lib/auth-session";
+import { resolveActiveCampaign } from "@/lib/active-campaign";
 import { formatPgError } from "@/lib/db/connection-url";
 import {
   addCampaign,
@@ -20,9 +21,12 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const data = await readCampaigns();
-    const jar = await cookies();
-    const activeId = jar.get(CAMPAIGN_COOKIE)?.value ?? null;
-    return NextResponse.json({ ...data, activeId });
+    const activeCampaign = await resolveActiveCampaign();
+    return NextResponse.json({
+      ...data,
+      activeId: activeCampaign?.id ?? null,
+      activeCampaign,
+    });
   } catch (err) {
     console.error("[campaigns] GET failed", err);
     const message = formatPgError(err);
@@ -49,37 +53,19 @@ export async function POST(request: Request) {
 
     let hookIds = body.hookIds ?? [];
     let demoIds = body.demoIds ?? [];
-    let captionIds = body.captionIds ?? [];
-    let useCaptions = Boolean(body.useCaptions);
-    let audioMode: CampaignAudioMode = body.audioMode ?? "none";
-    let musicId = body.musicId ?? null;
-    let musicVolume = body.musicVolume ?? DEFAULT_MUSIC_VOLUME;
-    let randomFormat = body.randomFormat !== false;
-    let borrowFromCampaignId: string | null = null;
-    let borrowAssetKind: CampaignBorrowAssetKind | null = null;
+    const audioMode: CampaignAudioMode = body.audioMode ?? "none";
+    const musicId = body.musicId ?? null;
+    const musicVolume = body.musicVolume ?? DEFAULT_MUSIC_VOLUME;
+    const randomFormat = body.randomFormat !== false;
 
-    if (body.borrowFromCampaignId) {
-      const data = await readCampaigns();
-      const source = data.campaigns.find(
-        (c) => c.id === body.borrowFromCampaignId,
+    if (body.borrowFromCampaignId || body.borrowAssetKind) {
+      return NextResponse.json(
+        {
+          error:
+            "Reusing hooks or demos from another campaign is disabled. Duplicate a campaign instead.",
+        },
+        { status: 400 },
       );
-      if (!source) {
-        return NextResponse.json(
-          { error: "Source campaign not found." },
-          { status: 400 },
-        );
-      }
-      if (!body.borrowAssetKind) {
-        return NextResponse.json(
-          { error: "Choose whether to reuse hooks or demos from the source campaign." },
-          { status: 400 },
-        );
-      }
-      borrowFromCampaignId = source.id;
-      borrowAssetKind = body.borrowAssetKind;
-      // Only link one asset type — the other side stays empty for this campaign.
-      hookIds = [];
-      demoIds = [];
     }
 
     const name = body.name?.trim();
@@ -92,14 +78,14 @@ export async function POST(request: Request) {
       status: "open",
       hookIds,
       demoIds,
-      captionIds,
-      useCaptions,
+      captionIds: [],
+      useCaptions: false,
       audioMode,
       musicId: audioMode === "none" ? null : musicId,
       musicVolume,
       randomFormat,
-      borrowFromCampaignId,
-      borrowAssetKind,
+      borrowFromCampaignId: null,
+      borrowAssetKind: null,
     });
 
     const secure = isSecureRequest(request);

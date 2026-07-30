@@ -173,6 +173,8 @@ export type Campaign = {
   /** Mirror hook or demo selection from another campaign (never both). */
   borrowFromCampaignId?: string | null;
   borrowAssetKind?: CampaignBorrowAssetKind | null;
+  /** Set when this campaign was created via Duplicate. */
+  copiedFromCampaignId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -222,6 +224,8 @@ export type LibraryData = {
 
 export type InstagramAccount = {
   id: string;
+  /** Campaign that owns this Instagram connection */
+  campaignId?: string | null;
   /** Instagram professional user id */
   igUserId: string;
   username: string;
@@ -252,6 +256,8 @@ export type ScheduledPostStatus =
 
 export type ScheduledPost = {
   id: string;
+  /** Campaign this post belongs to */
+  campaignId?: string | null;
   accountId: string;
   exportId: string;
   /** Snapshot for history after the export leaves the selectable list */

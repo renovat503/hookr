@@ -110,11 +110,11 @@ async function readLibraryPgScoped(
       case "assets":
         return await readLibraryPgForAssets(options?.campaignId);
       case "exports":
-        return await readLibraryPgForExports();
+        return await readLibraryPgForExports(options?.campaignId);
       case "create":
         return await readLibraryPgForCreate();
       case "produce":
-        return await readLibraryPgForProduce();
+        return await readLibraryPgForProduce(options?.campaignId);
       default:
         return await readLibraryPg();
     }
@@ -175,11 +175,20 @@ export async function readLibrary(
     data = await readLibraryJson();
     data = scopeLibraryFromJson(data, scope);
   }
-  if (options?.campaignId && scope === "assets") {
-    data = {
-      ...data,
-      hooks: data.hooks.filter((h) => h.campaignId === options.campaignId),
-    };
+  if (options?.campaignId) {
+    if (scope === "assets") {
+      data = {
+        ...data,
+        hooks: data.hooks.filter((h) => h.campaignId === options.campaignId),
+      };
+    } else if (scope === "exports" || scope === "produce") {
+      data = {
+        ...data,
+        exports: data.exports.filter(
+          (exp) => exp.campaignId === options.campaignId,
+        ),
+      };
+    }
   }
   return normalizeLibrary(data);
 }

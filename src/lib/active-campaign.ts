@@ -1,18 +1,45 @@
 import { cookies } from "next/headers";
-import { CAMPAIGN_COOKIE } from "@/lib/auth";
-import { getCampaign } from "@/lib/campaign-store";
+import { CAMPAIGN_COOKIE, campaignCookieOptions } from "@/lib/auth";
+import { getCampaign, readCampaigns } from "@/lib/campaign-store";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import type { Campaign } from "@/lib/types";
 
-export async function getActiveCampaignId(): Promise<string | null> {
+function campaignCookieSecure(): boolean {
+  return (
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.RAILWAY_ENVIRONMENT)
+  );
+}
+
+/** Active campaign from cookie, or the most recent campaign if none is selected. */
+export async function resolveActiveCampaign(): Promise<Campaign | null> {
   const jar = await cookies();
-  return jar.get(CAMPAIGN_COOKIE)?.value?.trim() ?? null;
+  const cookieId = jar.get(CAMPAIGN_COOKIE)?.value?.trim() ?? null;
+
+  if (cookieId) {
+    const campaign = await getCampaign(cookieId);
+    if (campaign) return campaign;
+  }
+
+  const { campaigns } = await readCampaigns();
+  const fallback = campaigns[0] ?? null;
+  if (!fallback) return null;
+
+  jar.set(
+    CAMPAIGN_COOKIE,
+    fallback.id,
+    campaignCookieOptions(campaignCookieSecure()),
+  );
+  return fallback;
+}
+
+export async function getActiveCampaignId(): Promise<string | null> {
+  const campaign = await resolveActiveCampaign();
+  return campaign?.id ?? null;
 }
 
 export async function getActiveCampaign(): Promise<Campaign | null> {
-  const id = await getActiveCampaignId();
-  if (!id) return null;
-  return getCampaign(id);
+  return resolveActiveCampaign();
 }
 
 export async function requireActiveCampaignId(options?: {

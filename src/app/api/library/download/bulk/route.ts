@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getActiveCampaignId } from "@/lib/active-campaign";
 import { readLibrary } from "@/lib/library-store";
 import {
   buildZipDownloadResponse,
@@ -17,26 +18,28 @@ type BulkDownloadBody = {
 };
 
 function itemsFromIds(ids: string[]): Promise<ZipDownloadItem[] | NextResponse> {
-  return readLibrary("exports").then((library) => {
-    const exportsById = new Map(library.exports.map((exp) => [exp.id, exp]));
-    const items: ZipDownloadItem[] = [];
+  return getActiveCampaignId().then((campaignId) =>
+    readLibrary("exports", { campaignId }).then((library) => {
+      const exportsById = new Map(library.exports.map((exp) => [exp.id, exp]));
+      const items: ZipDownloadItem[] = [];
 
-    for (const id of ids) {
-      const exp = exportsById.get(id);
-      if (!exp) {
-        return NextResponse.json(
-          { error: `Export not found: ${id}` },
-          { status: 404 },
-        );
+      for (const id of ids) {
+        const exp = exportsById.get(id);
+        if (!exp) {
+          return NextResponse.json(
+            { error: `Export not found: ${id}` },
+            { status: 404 },
+          );
+        }
+        items.push({
+          url: exp.url,
+          filename: exportDownloadFilenameFromUrl(exp.url, exp.id),
+        });
       }
-      items.push({
-        url: exp.url,
-        filename: exportDownloadFilenameFromUrl(exp.url, exp.id),
-      });
-    }
 
-    return items;
-  });
+      return items;
+    }),
+  );
 }
 
 async function handleDownload(

@@ -2,6 +2,7 @@ const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const SESSION_COOKIE = "hookr_session";
 export const CAMPAIGN_COOKIE = "hookr_campaign";
+export const IG_OAUTH_CAMPAIGN_COOKIE = "ig_oauth_campaign";
 
 type SessionPayload = {
   exp: number;
