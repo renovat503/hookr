@@ -39,6 +39,11 @@ import {
 } from "@/lib/posting-slots";
 import type { AccountPostingGoal, LibraryExport, YouTubeScheduledPost } from "@/lib/types";
 import { cn, friendlyFetchError } from "@/lib/utils";
+import {
+  formatYouTubeBulkScheduleNotice,
+  formatYouTubeUploadStatusMessage,
+  type YouTubeUploadStats,
+} from "@/lib/youtube-upload-policy";
 
 type PublicAccount = {
   id: string;
@@ -51,6 +56,7 @@ type QueueItem = YouTubeScheduledPost & { exportUrl?: string | null };
 type AccountQueue = {
   queue: QueueItem[];
   available: LibraryExport[];
+  publishedCount?: number;
 };
 
 type YouTubePayload = {
@@ -60,6 +66,9 @@ type YouTubePayload = {
   scheduledPosts: (YouTubeScheduledPost & { exportUrl?: string | null })[];
   queues: Record<string, AccountQueue>;
   postingGoals?: Record<string, AccountPostingGoal>;
+  uploadStats?: Record<string, YouTubeUploadStats>;
+  quotaExhaustedUntil?: string | null;
+  quotaExhaustedNow?: boolean;
 };
 
 type ViewMode = "week" | "month" | "queue";
@@ -149,6 +158,16 @@ export function YouTubeScheduler() {
     [data?.postingGoals, activeAccountId],
   );
 
+  const activeUploadStats = useMemo(
+    () => (activeAccountId ? data?.uploadStats?.[activeAccountId] ?? null : null),
+    [data?.uploadStats, activeAccountId],
+  );
+
+  const uploadStatusMessage = useMemo(
+    () => (activeUploadStats ? formatYouTubeUploadStatusMessage(activeUploadStats) : null),
+    [activeUploadStats],
+  );
+
   const occupiedSlots = useMemo(() => {
     if (!data || !activeAccountId) return new Set<string>();
     return getOccupiedSlotKeys(
@@ -166,6 +185,35 @@ export function YouTubeScheduler() {
       Math.min(availableExports.length, 60),
     );
   }, [activePostingGoal.slotTimes, occupiedSlots, availableExports.length]);
+
+  const bulkScheduleDisabledReason = useMemo(() => {
+    if (!data || !activeAccountId) return null;
+    if (availableExports.length > 0 && bulkPreviewSlots.length > 0) return null;
+
+    if (!availableExports.length) {
+      if (data.exports.length === 0) {
+        return "Create exports in Produce first.";
+      }
+      const publishedCount = activeQueue?.publishedCount ?? 0;
+      const blockedCount = data.exports.length - availableExports.length;
+      if (publishedCount > 0 && blockedCount <= publishedCount) {
+        return "Exports in your library were already published on this YouTube account.";
+      }
+      if (unscheduledQueue.length > 0) {
+        return "Videos in the queue must be scheduled individually, or remove them from the queue to bulk schedule.";
+      }
+      return "All exports are already queued or scheduled for this account.";
+    }
+
+    return "No open slots in your posting goal — clear future posts or adjust posting times.";
+  }, [
+    data,
+    activeAccountId,
+    availableExports.length,
+    bulkPreviewSlots.length,
+    activeQueue?.publishedCount,
+    unscheduledQueue.length,
+  ]);
 
   const openCreateModal = (date?: Date, time?: string) => {
     if (date && isPastDay(date)) {
@@ -497,6 +545,22 @@ export function YouTubeScheduler() {
         </p>
       ) : null}
 
+      {activeUploadStats && uploadStatusMessage ? (
+        <div
+          className={cn(
+            "rounded-xl border px-4 py-3 text-sm",
+            activeUploadStats.quotaExhaustedNow || activeUploadStats.failed > 0
+              ? "border-warning/30 bg-warning/10 text-foreground"
+              : "border-border bg-surface/70 text-muted",
+          )}
+        >
+          <p>{uploadStatusMessage}</p>
+          <p className="mt-2 text-xs text-muted">
+            Green = on YouTube waiting to publish · Amber = scheduled locally, upload starts within 24 hours · Red = upload failed (click slot for details)
+          </p>
+        </div>
+      ) : null}
+
       {/* Top bar: account selector + view toggle */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -613,25 +677,37 @@ export function YouTubeScheduler() {
             />
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={busy || !availableExports.length || !bulkPreviewSlots.length}
-              onClick={() => setBulkModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
-            >
-              <Layers className="h-4 w-4" />
-              Bulk schedule
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => openCreateModal()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
-            >
-              <Plus className="h-4 w-4" />
-              New post
-            </button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !availableExports.length ||
+                  !bulkPreviewSlots.length
+                }
+                title={bulkScheduleDisabledReason ?? undefined}
+                onClick={() => setBulkModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
+              >
+                <Layers className="h-4 w-4" />
+                Bulk schedule
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => openCreateModal()}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                New post
+              </button>
+            </div>
+            {bulkScheduleDisabledReason ? (
+              <p className="max-w-md text-right text-xs text-muted">
+                {bulkScheduleDisabledReason}
+              </p>
+            ) : null}
           </div>
 
           {viewMode === "week" ? (
@@ -715,7 +791,12 @@ export function YouTubeScheduler() {
               <p className="py-8 text-center text-sm text-muted">
                 {data.exports.length === 0
                   ? "No exports yet — create some in Produce."
-                  : "All videos are queued or scheduled for this account."}
+                  : (activeQueue?.publishedCount ?? 0) > 0 &&
+                      data.exports.length <= (activeQueue?.publishedCount ?? 0)
+                    ? "Exports in your library were already published on this YouTube account."
+                    : unscheduledQueue.length > 0
+                      ? "Videos in the queue are reserved — schedule them from the calendar or remove them from the queue to bulk schedule."
+                      : "All videos are queued or scheduled for this account."}
               </p>
             ) : (
               <ul className="max-h-[420px] space-y-2 overflow-y-auto">
@@ -848,6 +929,14 @@ export function YouTubeScheduler() {
         accountUsername={activeAccount?.channelTitle ?? ""}
         exports={availableExports}
         previewSlots={bulkPreviewSlots}
+        uploadNotice={
+          activeUploadStats
+            ? formatYouTubeBulkScheduleNotice(
+                Math.min(availableExports.length, bulkPreviewSlots.length),
+                activeUploadStats,
+              )
+            : undefined
+        }
         onClose={() => setBulkModalOpen(false)}
         onConfirm={bulkSchedule}
       />

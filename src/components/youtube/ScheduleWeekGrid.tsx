@@ -15,6 +15,19 @@ import {
 import type { YouTubeScheduledPost } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+function youTubeSlotClassName(post: YouTubeScheduledPost): string {
+  if (post.status === "failed") {
+    return "border-danger/40 bg-danger/10 hover:bg-danger/15";
+  }
+  if (post.status === "published") {
+    return "border-border/60 bg-surface/50 opacity-60";
+  }
+  if (post.youtubeVideoId) {
+    return "border-accent/40 bg-accent/10 hover:bg-accent/15";
+  }
+  return "border-warning/40 bg-warning/10 hover:bg-warning/15";
+}
+
 export type WeekGridPost = YouTubeScheduledPost & {
   exportUrl?: string | null;
 };
@@ -112,11 +125,7 @@ export function ScheduleWeekGrid({
                         onClick={() => onSlotClick(slot, post)}
                         className={cn(
                           "w-full rounded-xl border px-2 py-2 text-left transition-colors",
-                          post.status === "published"
-                            ? "border-border/60 bg-surface/50 opacity-60"
-                            : post.status === "failed"
-                              ? "border-danger/40 bg-danger/10"
-                              : "border-accent/40 bg-accent/10 hover:bg-accent/15",
+                          youTubeSlotClassName(post),
                         )}
                       >
                         <p className="truncate text-[11px] font-semibold leading-tight">

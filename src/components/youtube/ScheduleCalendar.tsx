@@ -40,6 +40,19 @@ const STATUS_STYLES: Partial<Record<ScheduledPostStatus, string>> = {
   publishing: "border-warning/40 bg-warning/10",
 };
 
+function youTubeSlotClassName(post: YouTubeScheduledPost): string {
+  if (post.status === "failed") {
+    return "border-danger/40 bg-danger/10 hover:bg-danger/15";
+  }
+  if (post.status === "published") {
+    return "border-border/60 bg-surface/50 opacity-60";
+  }
+  if (post.youtubeVideoId) {
+    return "border-accent/40 bg-accent/10 hover:bg-accent/15";
+  }
+  return "border-warning/40 bg-warning/10 hover:bg-warning/15";
+}
+
 function canDragPost(post: YouTubeScheduledPost): boolean {
   return (
     post.status === "scheduled" ||
@@ -297,16 +310,14 @@ export function ScheduleCalendar({
                         }}
                         className={cn(
                           "flex w-full items-center gap-1 rounded-lg border px-1.5 py-1 text-left transition-colors",
-                          post.status === "failed"
-                            ? "border-danger/40 bg-danger/10"
-                            : "border-accent/40 bg-accent/10 hover:bg-accent/15",
+                          youTubeSlotClassName(post),
                           STATUS_STYLES[post.status],
                           draggable && "cursor-grab active:cursor-grabbing",
                           isDragging && "opacity-40",
                         )}
                       >
-                        <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af] text-[7px] font-bold text-white">
-                          IG
+                        <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded bg-[#ff0000] text-[7px] font-bold text-white">
+                          YT
                         </span>
                         <span className="min-w-0 flex-1 truncate text-[10px] font-medium leading-tight sm:text-[11px]">
                           {formatSlotTimeLabel(time)}

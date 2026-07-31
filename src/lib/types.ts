@@ -314,6 +314,7 @@ export type YouTubeScheduledPost = {
   createdAt: string;
   publishedAt?: string | null;
   youtubeVideoId?: string | null;
+  uploadedAt?: string | null;
   error?: string | null;
 };
 

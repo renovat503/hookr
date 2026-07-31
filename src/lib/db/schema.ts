@@ -233,6 +233,7 @@ export const youtubeScheduledPosts = pgTable("youtube_scheduled_posts", {
     .defaultNow(),
   publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" }),
   youtubeVideoId: text("youtube_video_id"),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: "string" }),
   error: text("error"),
 });
 

@@ -178,6 +178,30 @@ export function SchedulePostModal({
     }
   };
 
+  const retryUpload = async () => {
+    if (!editingPost) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/youtube/schedule/${encodeURIComponent(editingPost.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ retry: true }),
+        },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not retry upload.");
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
       <div
@@ -203,6 +227,31 @@ export function SchedulePostModal({
           {error ? (
             <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
               {error}
+            </p>
+          ) : null}
+
+          {editingPost?.status === "failed" && editingPost.error ? (
+            <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+              <p className="font-medium">Upload failed</p>
+              <p className="mt-1 whitespace-pre-wrap">{editingPost.error}</p>
+              <p className="mt-2 text-xs text-danger/80">
+                Quota failures retry automatically after the daily reset. You can
+                also retry manually once uploads are available again.
+              </p>
+            </div>
+          ) : null}
+
+          {editingPost?.status === "scheduled" && editingPost.youtubeVideoId ? (
+            <p className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-foreground">
+              This video is already on YouTube and will go public at the scheduled
+              time.
+            </p>
+          ) : null}
+
+          {editingPost?.status === "scheduled" && !editingPost.youtubeVideoId ? (
+            <p className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+              Scheduled locally. Hookr uploads to YouTube within 24 hours of this
+              publish time (about six uploads per day).
             </p>
           ) : null}
 
@@ -335,19 +384,30 @@ export function SchedulePostModal({
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3">
-          {mode === "edit" && canEditSchedule ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void cancelPost()}
-              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-50"
-            >
-              <Trash2 className="h-4 w-4" />
-              Remove
-            </button>
-          ) : (
-            <span />
-          )}
+          <div className="flex items-center gap-2">
+            {mode === "edit" && canEditSchedule ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void cancelPost()}
+                className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Remove
+              </button>
+            ) : null}
+            {editingPost?.status === "failed" ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void retryUpload()}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Retry upload
+              </button>
+            ) : null}
+          </div>
           <div className="flex gap-2">
             <button
               type="button"

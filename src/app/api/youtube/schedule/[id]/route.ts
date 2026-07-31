@@ -17,6 +17,7 @@ type PatchBody = {
   title?: string;
   description?: string;
   caption?: string;
+  retry?: boolean;
 };
 
 export async function DELETE(_request: Request, { params }: Params) {
@@ -39,6 +40,16 @@ export async function PATCH(request: Request, { params }: Params) {
     const updated = await updateYouTubeScheduledPost(id, {
       status: "cancelled",
       error: null,
+    });
+    return NextResponse.json(updated);
+  }
+
+  if (body.retry && existing.status === "failed") {
+    const updated = await updateYouTubeScheduledPost(id, {
+      status: "scheduled",
+      error: null,
+      youtubeVideoId: null,
+      uploadedAt: null,
     });
     return NextResponse.json(updated);
   }

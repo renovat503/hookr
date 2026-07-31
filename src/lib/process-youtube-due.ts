@@ -2,9 +2,16 @@ import { resolveToLocalPath } from "@/lib/storage/media";
 import {
   ensureFreshAccessToken,
   getYouTubeVideoStatus,
-  isYouTubeQuotaError,
   uploadYouTubeVideo,
 } from "@/lib/youtube";
+import {
+  countYouTubeUploadsToday,
+  isYouTubeQuotaError,
+  isYouTubeQuotaExhausted,
+  isYouTubeQuotaFailure,
+  isYouTubeUploadDue,
+  YOUTUBE_DAILY_UPLOAD_LIMIT,
+} from "@/lib/youtube-upload-policy";
 import { inferYouTubePostSource } from "@/lib/youtube-queue";
 import { purgePublishedExportIfUnused } from "@/lib/purge-published-export";
 import {
@@ -37,13 +44,10 @@ export type ProcessDueResult = {
   results: ProcessResult[];
   skipped?: boolean;
   quotaExhaustedUntil?: string | null;
+  retriedFailed?: number;
 };
 
 let processing = false;
-
-function isYouTubeQuotaExhausted(until?: string | null) {
-  return Boolean(until && new Date(until).getTime() > Date.now());
-}
 
 async function getFreshAccount(account: YouTubeAccount): Promise<YouTubeAccount> {
   const accessToken = await ensureFreshAccessToken(account, async (patch) => {
@@ -52,6 +56,30 @@ async function getFreshAccount(account: YouTubeAccount): Promise<YouTubeAccount>
     if (patch.tokenExpiresAt) account.tokenExpiresAt = patch.tokenExpiresAt;
   });
   return { ...account, accessToken };
+}
+
+async function resetQuotaFailedPosts(
+  youtube: YouTubeData,
+): Promise<number> {
+  if (isYouTubeQuotaExhausted(youtube.quotaExhaustedUntil)) {
+    return 0;
+  }
+
+  let reset = 0;
+  for (const post of youtube.scheduledPosts) {
+    if (!isYouTubeQuotaFailure(post)) continue;
+    await updateYouTubeScheduledPost(post.id, {
+      status: "scheduled",
+      error: null,
+    });
+    reset += 1;
+  }
+
+  if (reset > 0) {
+    await setYouTubeQuotaExhaustedUntil(null);
+  }
+
+  return reset;
 }
 
 async function uploadScheduledPost(
@@ -90,16 +118,18 @@ async function uploadScheduledPost(
       publishNow,
     });
 
-    const publishedAt = new Date().toISOString();
+    const uploadedAt = new Date().toISOString();
+    const publishedAt = publishNow ? uploadedAt : null;
     await updateYouTubeScheduledPost(post.id, {
       youtubeVideoId: uploaded.videoId,
+      uploadedAt,
       status: publishNow ? "published" : "scheduled",
-      publishedAt: publishNow ? publishedAt : null,
+      publishedAt,
       error: null,
     });
 
     if (publishNow) {
-      await recordYouTubeAccountPublished(post.accountId, publishedAt);
+      await recordYouTubeAccountPublished(post.accountId, uploadedAt);
       if (post.campaignId) {
         await markYouTubeExportPublished(post.exportId, post.campaignId);
       }
@@ -189,6 +219,22 @@ async function finalizePublishedPost(
   }
 }
 
+function pendingUploadPosts(
+  youtube: YouTubeData,
+  id?: string,
+): YouTubeScheduledPost[] {
+  return youtube.scheduledPosts
+    .filter((post) => {
+      if (id) return post.id === id;
+      if (inferYouTubePostSource(post) === "auto") return false;
+      return isYouTubeUploadDue(post);
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
+    );
+}
+
 export async function processYouTubeDue(options?: {
   id?: string;
 }): Promise<ProcessDueResult> {
@@ -198,26 +244,34 @@ export async function processYouTubeDue(options?: {
 
   processing = true;
   try {
-    const youtube = await readYouTubeAll();
+    let youtube = await readYouTubeAll();
+    const retriedFailed = await resetQuotaFailedPosts(youtube);
+    if (retriedFailed > 0) {
+      youtube = await readYouTubeAll();
+    }
+
     if (isYouTubeQuotaExhausted(youtube.quotaExhaustedUntil)) {
       return {
         processed: 0,
         results: [],
         skipped: true,
         quotaExhaustedUntil: youtube.quotaExhaustedUntil ?? null,
+        retriedFailed,
       };
     }
 
     const library = await readLibrary("exports");
     const results: ProcessResult[] = [];
+    const uploadsTodayByAccount = new Map<string, number>();
 
-    const pendingUpload = youtube.scheduledPosts.filter((post) => {
-      if (options?.id) return post.id === options.id;
-      if (inferYouTubePostSource(post) === "auto") return false;
-      return post.status === "scheduled" && !post.youtubeVideoId;
-    });
+    for (const post of pendingUploadPosts(youtube, options?.id)) {
+      const uploadsToday =
+        uploadsTodayByAccount.get(post.accountId) ??
+        countYouTubeUploadsToday(youtube.scheduledPosts, post.accountId);
+      if (uploadsToday >= YOUTUBE_DAILY_UPLOAD_LIMIT) {
+        continue;
+      }
 
-    for (const post of pendingUpload) {
       const account = youtube.accounts.find((a) => a.id === post.accountId);
       const exp = library.exports.find((e) => e.id === post.exportId);
       if (!account) {
@@ -236,9 +290,18 @@ export async function processYouTubeDue(options?: {
         results.push({ id: post.id, ok: false, error: "Export missing" });
         continue;
       }
-      results.push(await uploadScheduledPost(youtube, post, account, exp));
+
+      const result = await uploadScheduledPost(youtube, post, account, exp);
+      results.push(result);
+      if (result.ok) {
+        uploadsTodayByAccount.set(post.accountId, uploadsToday + 1);
+      }
+      if (result.quotaExhausted) {
+        break;
+      }
     }
 
+    youtube = await readYouTubeAll();
     const pendingFinalize = youtube.scheduledPosts.filter((post) => {
       if (options?.id) return post.id === options.id;
       if (inferYouTubePostSource(post) === "auto") return false;
@@ -260,6 +323,7 @@ export async function processYouTubeDue(options?: {
       processed: results.length,
       results,
       quotaExhaustedUntil: youtube.quotaExhaustedUntil ?? null,
+      retriedFailed,
     };
   } finally {
     processing = false;

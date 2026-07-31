@@ -23,6 +23,7 @@ type BulkScheduleModalProps = {
   accountUsername: string;
   exports: LibraryExport[];
   previewSlots: ScheduleSlot[];
+  uploadNotice?: string;
   onClose: () => void;
   onConfirm: (
     assignments: BulkScheduleAssignment[],
@@ -50,6 +51,7 @@ export function BulkScheduleModal({
   accountUsername,
   exports,
   previewSlots,
+  uploadNotice,
   onClose,
   onConfirm,
 }: BulkScheduleModalProps) {
@@ -250,6 +252,12 @@ export function BulkScheduleModal({
         </div>
 
         <div className="space-y-4 overflow-y-auto p-4">
+          {uploadNotice ? (
+            <p className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+              {uploadNotice}
+            </p>
+          ) : null}
+
           {error ? (
             <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger whitespace-pre-wrap">
               {error}

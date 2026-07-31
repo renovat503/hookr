@@ -7,6 +7,10 @@ import {
 } from "@/lib/youtube-queue";
 import { getYouTubeConfig } from "@/lib/youtube";
 import {
+  getYouTubeUploadStatsForAccount,
+  isYouTubeQuotaExhausted,
+} from "@/lib/youtube-upload-policy";
+import {
   getPostingGoalForAccount,
   POSTING_GOAL_PRESETS,
 } from "@/lib/posting-slots";
@@ -20,10 +24,6 @@ import { formatPgError } from "@/lib/db/connection-url";
 import { withQueryTimeout } from "@/lib/db/query-timeout";
 
 export const runtime = "nodejs";
-
-function isYouTubeQuotaExhausted(until?: string | null) {
-  return Boolean(until && new Date(until).getTime() > Date.now());
-}
 
 export async function GET(request: Request) {
   try {
@@ -83,6 +83,16 @@ export async function GET(request: Request) {
       postingGoalPresets: POSTING_GOAL_PRESETS,
       quotaExhaustedUntil: youtube.quotaExhaustedUntil ?? null,
       quotaExhaustedNow: isYouTubeQuotaExhausted(youtube.quotaExhaustedUntil),
+      uploadStats: Object.fromEntries(
+        youtube.accounts.map((account) => [
+          account.id,
+          getYouTubeUploadStatsForAccount(
+            youtube.scheduledPosts,
+            account.id,
+            youtube.quotaExhaustedUntil,
+          ),
+        ]),
+      ),
     });
   } catch (err) {
     console.error("[youtube] GET failed", err);

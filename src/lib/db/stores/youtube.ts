@@ -70,6 +70,7 @@ function rowToScheduledPost(
     createdAt: row.createdAt,
     publishedAt: row.publishedAt,
     youtubeVideoId: row.youtubeVideoId,
+    uploadedAt: row.uploadedAt,
     error: row.error,
   };
 }
@@ -104,6 +105,7 @@ function scheduledPostValues(post: YouTubeScheduledPost) {
     createdAt: post.createdAt,
     publishedAt: post.publishedAt,
     youtubeVideoId: post.youtubeVideoId ?? null,
+    uploadedAt: post.uploadedAt ?? null,
     error: post.error,
   };
 }
@@ -129,6 +131,7 @@ function scheduledPostPatch(
   if (patch.youtubeVideoId !== undefined) {
     set.youtubeVideoId = patch.youtubeVideoId ?? null;
   }
+  if (patch.uploadedAt !== undefined) set.uploadedAt = patch.uploadedAt;
   if (patch.error !== undefined) set.error = patch.error;
   return set;
 }
