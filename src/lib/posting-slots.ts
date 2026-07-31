@@ -124,6 +124,22 @@ export function addWeeks(date: Date, weeks: number): Date {
 }
 
 const OCCUPIED_STATUSES = new Set(["scheduled", "publishing"]);
+const BULK_OCCUPIED_STATUSES = new Set(["scheduled", "publishing", "failed"]);
+
+export const BULK_SCHEDULE_MAX_DAYS = 365;
+
+export function bulkScheduleHorizonDays(
+  exportCount: number,
+  slotsPerDay: number,
+): number {
+  const perDay = Math.max(1, slotsPerDay);
+  const batch = Math.min(Math.max(exportCount, 1), 60);
+  const needed = Math.ceil(batch / perDay) + 30;
+  return Math.min(
+    BULK_SCHEDULE_MAX_DAYS,
+    Math.max(BULK_SCHEDULE_MAX_DAYS, needed),
+  );
+}
 
 export function getOccupiedSlotKeys(
   posts: SlotScheduledPost[],
@@ -135,6 +151,21 @@ export function getOccupiedSlotKeys(
     accountId,
     slotTimes,
     new Date().getTimezoneOffset(),
+    OCCUPIED_STATUSES,
+  );
+}
+
+export function getOccupiedSlotKeysForBulk(
+  posts: SlotScheduledPost[],
+  accountId: string,
+  slotTimes: string[],
+): Set<string> {
+  return getOccupiedSlotKeysInOffset(
+    posts,
+    accountId,
+    slotTimes,
+    new Date().getTimezoneOffset(),
+    BULK_OCCUPIED_STATUSES,
   );
 }
 
@@ -143,11 +174,12 @@ export function getOccupiedSlotKeysInOffset(
   accountId: string,
   slotTimes: string[],
   timezoneOffsetMinutes: number,
+  statuses: Set<string> = OCCUPIED_STATUSES,
 ): Set<string> {
   const allowed = new Set(normalizeSlotTimes(slotTimes));
   const occupied = new Set<string>();
   for (const post of posts) {
-    if (post.accountId !== accountId || !OCCUPIED_STATUSES.has(post.status)) {
+    if (post.accountId !== accountId || !statuses.has(post.status)) {
       continue;
     }
     const parts = getSchedulePartsInOffset(
@@ -254,6 +286,7 @@ export function previewBulkSchedule(
   slotTimes: string[],
   occupied: Set<string>,
   exportCount: number,
+  maxDays = BULK_SCHEDULE_MAX_DAYS,
 ): ScheduleSlot[] {
-  return getNextAvailableSlots(slotTimes, occupied, exportCount);
+  return getNextAvailableSlots(slotTimes, occupied, exportCount, new Date(), maxDays);
 }

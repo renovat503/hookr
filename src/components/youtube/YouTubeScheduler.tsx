@@ -32,8 +32,10 @@ import {
   validateScheduleInstant,
 } from "@/lib/calendar-utils";
 import {
+  bulkScheduleHorizonDays,
   getNextAvailableSlots,
   getOccupiedSlotKeys,
+  getOccupiedSlotKeysForBulk,
   getPostingGoalForAccount,
   type ScheduleSlot,
 } from "@/lib/posting-slots";
@@ -177,14 +179,39 @@ export function YouTubeScheduler() {
     );
   }, [data, activeAccountId, activePostingGoal.slotTimes]);
 
+  const bulkOccupiedSlots = useMemo(() => {
+    if (!data || !activeAccountId) return new Set<string>();
+    return getOccupiedSlotKeysForBulk(
+      data.scheduledPosts,
+      activeAccountId,
+      activePostingGoal.slotTimes,
+    );
+  }, [data, activeAccountId, activePostingGoal.slotTimes]);
+
+  const bulkPreviewMaxDays = useMemo(
+    () =>
+      bulkScheduleHorizonDays(
+        availableExports.length,
+        activePostingGoal.slotTimes.length,
+      ),
+    [availableExports.length, activePostingGoal.slotTimes.length],
+  );
+
   const bulkPreviewSlots = useMemo(() => {
     if (!availableExports.length) return [];
     return getNextAvailableSlots(
       activePostingGoal.slotTimes,
-      occupiedSlots,
+      bulkOccupiedSlots,
       Math.min(availableExports.length, 60),
+      new Date(),
+      bulkPreviewMaxDays,
     );
-  }, [activePostingGoal.slotTimes, occupiedSlots, availableExports.length]);
+  }, [
+    activePostingGoal.slotTimes,
+    bulkOccupiedSlots,
+    availableExports.length,
+    bulkPreviewMaxDays,
+  ]);
 
   const bulkScheduleDisabledReason = useMemo(() => {
     if (!data || !activeAccountId) return null;
@@ -205,12 +232,13 @@ export function YouTubeScheduler() {
       return "All exports are already queued or scheduled for this account.";
     }
 
-    return "No open slots in your posting goal — clear future posts or adjust posting times.";
+    return `Calendar is full for the next ${bulkPreviewMaxDays} days. Cancel or move existing posts to free slots — you still have ${availableExports.length} export${availableExports.length === 1 ? "" : "s"} available.`;
   }, [
     data,
     activeAccountId,
     availableExports.length,
     bulkPreviewSlots.length,
+    bulkPreviewMaxDays,
     activeQueue?.publishedCount,
     unscheduledQueue.length,
   ]);
