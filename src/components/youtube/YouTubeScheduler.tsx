@@ -13,6 +13,7 @@ import {
   Loader2,
   Plus,
   Trash2,
+  Unlink,
 } from "lucide-react";
 import { BulkScheduleModal } from "@/components/youtube/BulkScheduleModal";
 import { PostingGoalPanel } from "@/components/youtube/PostingGoalPanel";
@@ -95,7 +96,10 @@ export function YouTubeScheduler() {
       const json = (await res.json()) as YouTubePayload & { error?: string };
       if (!res.ok) throw new Error(json.error || "Could not load YouTube.");
       setData(json);
-      setActiveAccountId((current) => current || json.accounts[0]?.id || "");
+      setActiveAccountId((current) => {
+        if (current && json.accounts.some((a) => a.id === current)) return current;
+        return json.accounts[0]?.id || "";
+      });
     } catch (err) {
       if (!options?.silent) {
         setError(friendlyFetchError(err, "Load failed."));
@@ -317,6 +321,35 @@ export function YouTubeScheduler() {
     }
   };
 
+  const disconnectAccount = async () => {
+    if (!activeAccountId || !activeAccount) return;
+    const label = activeAccount.channelTitle;
+    if (
+      !window.confirm(
+        `Disconnect ${label}? Queued and scheduled posts for this account will be cancelled.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch(
+        `/api/youtube/accounts/disconnect?id=${encodeURIComponent(activeAccountId)}`,
+        { method: "DELETE" },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not disconnect.");
+      setNotice(`${label} disconnected.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not disconnect.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const moveQueueItem = async (index: number, direction: -1 | 1) => {
     if (!activeAccountId || !activeQueue) return;
     const target = index + direction;
@@ -499,6 +532,17 @@ export function YouTubeScheduler() {
             <Link2 className="h-4 w-4" />
             Connect
           </a>
+          {activeAccountId ? (
+            <button
+              type="button"
+              onClick={() => void disconnectAccount()}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm text-muted hover:border-red-500/50 hover:text-red-400 disabled:opacity-50"
+            >
+              <Unlink className="h-4 w-4" />
+              Disconnect
+            </button>
+          ) : null}
         </div>
 
         {data.accounts.length > 0 ? (
