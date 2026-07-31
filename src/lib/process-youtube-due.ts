@@ -108,36 +108,31 @@ async function uploadScheduledPost(
   try {
     const freshAccount = await getFreshAccount(account);
     const videoPath = await resolveToLocalPath(exp.url);
-    const publishNow = new Date(post.scheduledAt).getTime() <= Date.now();
     const uploaded = await uploadYouTubeVideo({
       accessToken: freshAccount.accessToken,
       videoPath,
       title: post.title,
       description: post.description,
-      publishAt: publishNow ? null : post.scheduledAt,
-      publishNow,
+      publishNow: true,
     });
 
     const uploadedAt = new Date().toISOString();
-    const publishedAt = publishNow ? uploadedAt : null;
     await updateYouTubeScheduledPost(post.id, {
       youtubeVideoId: uploaded.videoId,
       uploadedAt,
-      status: publishNow ? "published" : "scheduled",
-      publishedAt,
+      status: "published",
+      publishedAt: uploadedAt,
       error: null,
     });
 
-    if (publishNow) {
-      await recordYouTubeAccountPublished(post.accountId, uploadedAt);
-      if (post.campaignId) {
-        await markYouTubeExportPublished(post.exportId, post.campaignId);
-      }
-      try {
-        await purgePublishedExportIfUnused(post.exportId, exp.url);
-      } catch (err) {
-        console.error("[youtube] purge after publish failed", post.exportId, err);
-      }
+    await recordYouTubeAccountPublished(post.accountId, uploadedAt);
+    if (post.campaignId) {
+      await markYouTubeExportPublished(post.exportId, post.campaignId);
+    }
+    try {
+      await purgePublishedExportIfUnused(post.exportId, exp.url);
+    } catch (err) {
+      console.error("[youtube] purge after publish failed", post.exportId, err);
     }
 
     return {
@@ -168,6 +163,7 @@ async function uploadScheduledPost(
   }
 }
 
+/** Legacy posts uploaded early with YouTube publishAt — finalize when time arrives. */
 async function finalizePublishedPost(
   post: YouTubeScheduledPost,
   account: YouTubeAccount,

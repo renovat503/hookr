@@ -243,15 +243,15 @@ export function SchedulePostModal({
 
           {editingPost?.status === "scheduled" && editingPost.youtubeVideoId ? (
             <p className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-foreground">
-              This video is already on YouTube and will go public at the scheduled
-              time.
+              This video was uploaded to YouTube early and is waiting for its
+              scheduled publish time.
             </p>
           ) : null}
 
           {editingPost?.status === "scheduled" && !editingPost.youtubeVideoId ? (
             <p className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-              Scheduled locally. Hookr uploads to YouTube within 24 hours of this
-              publish time (about six uploads per day).
+              Scheduled locally only. Hookr uploads to YouTube as public when this
+              time arrives (about six uploads per day).
             </p>
           ) : null}
 

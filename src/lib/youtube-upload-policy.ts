@@ -4,9 +4,6 @@ import type { YouTubeScheduledPost } from "@/lib/types";
 /** YouTube default API quota allows roughly six uploads per day. */
 export const YOUTUBE_DAILY_UPLOAD_LIMIT = 6;
 
-/** Start uploading this long before the public publish time. */
-export const YOUTUBE_UPLOAD_LEAD_MS = 24 * 60 * 60 * 1000;
-
 export function isYouTubeQuotaError(message: string): boolean {
   return /quota|dailyLimitExceeded|uploadLimitExceeded/i.test(message);
 }
@@ -15,8 +12,8 @@ export type YouTubeUploadStats = {
   dailyLimit: number;
   uploadsToday: number;
   uploadsRemainingToday: number;
-  pendingInWindow: number;
-  waitingForUploadWindow: number;
+  dueNow: number;
+  scheduledLocally: number;
   uploadedWaitingPublish: number;
   failed: number;
   quotaExhaustedUntil: string | null;
@@ -27,16 +24,17 @@ export function isYouTubeQuotaExhausted(until?: string | null): boolean {
   return Boolean(until && new Date(until).getTime() > Date.now());
 }
 
-export function isWithinYouTubeUploadWindow(
+/** True when the scheduled publish time has arrived (or passed). */
+export function isYouTubePublishDue(
   scheduledAt: string,
   now = Date.now(),
 ): boolean {
-  return new Date(scheduledAt).getTime() - now <= YOUTUBE_UPLOAD_LEAD_MS;
+  return new Date(scheduledAt).getTime() <= now;
 }
 
 export function isYouTubeUploadDue(post: YouTubeScheduledPost): boolean {
   if (post.status !== "scheduled" || post.youtubeVideoId) return false;
-  return isWithinYouTubeUploadWindow(post.scheduledAt);
+  return isYouTubePublishDue(post.scheduledAt);
 }
 
 export function isYouTubeQuotaFailure(post: YouTubeScheduledPost): boolean {
@@ -66,12 +64,12 @@ export function getYouTubeUploadStatsForAccount(
 ): YouTubeUploadStats {
   const accountPosts = posts.filter((post) => post.accountId === accountId);
   const uploadsToday = countYouTubeUploadsToday(accountPosts, accountId);
-  const pendingInWindow = accountPosts.filter(isYouTubeUploadDue).length;
-  const waitingForUploadWindow = accountPosts.filter(
+  const dueNow = accountPosts.filter(isYouTubeUploadDue).length;
+  const scheduledLocally = accountPosts.filter(
     (post) =>
       post.status === "scheduled" &&
       !post.youtubeVideoId &&
-      !isWithinYouTubeUploadWindow(post.scheduledAt),
+      !isYouTubePublishDue(post.scheduledAt),
   ).length;
   const uploadedWaitingPublish = accountPosts.filter(
     (post) => post.status === "scheduled" && Boolean(post.youtubeVideoId),
@@ -83,8 +81,8 @@ export function getYouTubeUploadStatsForAccount(
     dailyLimit: YOUTUBE_DAILY_UPLOAD_LIMIT,
     uploadsToday,
     uploadsRemainingToday: Math.max(0, YOUTUBE_DAILY_UPLOAD_LIMIT - uploadsToday),
-    pendingInWindow,
-    waitingForUploadWindow,
+    dueNow,
+    scheduledLocally,
     uploadedWaitingPublish,
     failed,
     quotaExhaustedUntil: quotaExhaustedUntil ?? null,
@@ -106,25 +104,22 @@ export function formatYouTubeUploadStatusMessage(
   }
 
   const parts = [
-    `YouTube allows about ${stats.dailyLimit} uploads per day. Hookr uploads each video within 24 hours of its publish time.`,
+    "Posts stay on the Hookr calendar until their scheduled time, then upload to YouTube as public.",
+    `YouTube allows about ${stats.dailyLimit} uploads per day`,
     `Today: ${stats.uploadsToday}/${stats.dailyLimit} uploaded`,
   ];
 
+  if (stats.scheduledLocally > 0) {
+    parts.push(`${stats.scheduledLocally} scheduled locally`);
+  }
+  if (stats.dueNow > 0) {
+    parts.push(`${stats.dueNow} ready to upload now`);
+  }
   if (stats.uploadedWaitingPublish > 0) {
-    parts.push(
-      `${stats.uploadedWaitingPublish} on YouTube waiting to go public`,
-    );
-  }
-  if (stats.waitingForUploadWindow > 0) {
-    parts.push(`${stats.waitingForUploadWindow} scheduled farther out`);
-  }
-  if (stats.pendingInWindow > 0) {
-    parts.push(`${stats.pendingInWindow} ready to upload now`);
+    parts.push(`${stats.uploadedWaitingPublish} legacy uploads waiting to go public`);
   }
   if (stats.failed > 0) {
-    parts.push(
-      `${stats.failed} failed (quota failures retry automatically)`,
-    );
+    parts.push(`${stats.failed} failed (quota failures retry automatically)`);
   }
 
   return parts.join(" · ");
@@ -135,5 +130,5 @@ export function formatYouTubeBulkScheduleNotice(
   stats: YouTubeUploadStats,
 ): string {
   const daysNeeded = Math.ceil(count / stats.dailyLimit);
-  return `Bulk schedule adds calendar slots immediately. YouTube only accepts about ${stats.dailyLimit} uploads per day, so ${count} video${count === 1 ? "" : "s"} will upload over roughly ${daysNeeded} day${daysNeeded === 1 ? "" : "s"} (starting 24 hours before each slot).`;
+  return `Bulk schedule fills the calendar locally only — nothing uploads to YouTube until each slot's time. At about ${stats.dailyLimit} uploads per day, ${count} video${count === 1 ? "" : "s"} need roughly ${daysNeeded} day${daysNeeded === 1 ? "" : "s"} of publish times.`;
 }

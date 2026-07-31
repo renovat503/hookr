@@ -556,7 +556,7 @@ export function YouTubeScheduler() {
         >
           <p>{uploadStatusMessage}</p>
           <p className="mt-2 text-xs text-muted">
-            Green = on YouTube waiting to publish · Amber = scheduled locally, upload starts within 24 hours · Red = upload failed (click slot for details)
+            Amber = scheduled locally (uploads at slot time) · Green = published on YouTube · Red = upload failed (click slot for details)
           </p>
         </div>
       ) : null}
