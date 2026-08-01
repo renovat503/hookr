@@ -31,8 +31,10 @@ import {
   validateScheduleInstant,
 } from "@/lib/calendar-utils";
 import {
+  bulkScheduleHorizonDays,
   getNextAvailableSlots,
   getOccupiedSlotKeys,
+  getOccupiedSlotKeysForBulk,
   getPostingGoalForAccount,
   type ScheduleSlot,
 } from "@/lib/posting-slots";
@@ -50,6 +52,7 @@ type QueueItem = ScheduledPost & { exportUrl?: string | null };
 type AccountQueue = {
   queue: QueueItem[];
   available: LibraryExport[];
+  publishedCount?: number;
 };
 
 type InstagramPayload = {
@@ -154,14 +157,69 @@ export function InstagramScheduler() {
     );
   }, [data, activeAccountId, activePostingGoal.slotTimes]);
 
+  const bulkOccupiedSlots = useMemo(() => {
+    if (!data || !activeAccountId) return new Set<string>();
+    return getOccupiedSlotKeysForBulk(
+      data.scheduledPosts,
+      activeAccountId,
+      activePostingGoal.slotTimes,
+    );
+  }, [data, activeAccountId, activePostingGoal.slotTimes]);
+
+  const bulkPreviewMaxDays = useMemo(
+    () =>
+      bulkScheduleHorizonDays(
+        availableExports.length,
+        activePostingGoal.slotTimes.length,
+      ),
+    [availableExports.length, activePostingGoal.slotTimes.length],
+  );
+
   const bulkPreviewSlots = useMemo(() => {
     if (!availableExports.length) return [];
     return getNextAvailableSlots(
       activePostingGoal.slotTimes,
-      occupiedSlots,
+      bulkOccupiedSlots,
       Math.min(availableExports.length, 60),
+      new Date(),
+      bulkPreviewMaxDays,
     );
-  }, [activePostingGoal.slotTimes, occupiedSlots, availableExports.length]);
+  }, [
+    activePostingGoal.slotTimes,
+    bulkOccupiedSlots,
+    availableExports.length,
+    bulkPreviewMaxDays,
+  ]);
+
+  const bulkScheduleDisabledReason = useMemo(() => {
+    if (!data || !activeAccountId) return null;
+    if (availableExports.length > 0 && bulkPreviewSlots.length > 0) return null;
+
+    if (!availableExports.length) {
+      if (data.exports.length === 0) {
+        return "Create exports in Produce first.";
+      }
+      const publishedCount = activeQueue?.publishedCount ?? 0;
+      const blockedCount = data.exports.length - availableExports.length;
+      if (publishedCount > 0 && blockedCount <= publishedCount) {
+        return "Exports in your library were already published on this Instagram account.";
+      }
+      if (unscheduledQueue.length > 0) {
+        return "Videos in the queue must be scheduled individually, or remove them from the queue to bulk schedule.";
+      }
+      return "All exports are already queued or scheduled for this account.";
+    }
+
+    return `Calendar is full for the next ${bulkPreviewMaxDays} days. Cancel or move existing posts to free slots — you still have ${availableExports.length} export${availableExports.length === 1 ? "" : "s"} available.`;
+  }, [
+    data,
+    activeAccountId,
+    availableExports.length,
+    bulkPreviewSlots.length,
+    bulkPreviewMaxDays,
+    activeQueue?.publishedCount,
+    unscheduledQueue.length,
+  ]);
 
   const openCreateModal = (date?: Date, time?: string) => {
     if (date && isPastDay(date)) {
@@ -569,25 +627,37 @@ export function InstagramScheduler() {
             />
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={busy || !availableExports.length || !bulkPreviewSlots.length}
-              onClick={() => setBulkModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
-            >
-              <Layers className="h-4 w-4" />
-              Bulk schedule
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => openCreateModal()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
-            >
-              <Plus className="h-4 w-4" />
-              New post
-            </button>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !availableExports.length ||
+                  !bulkPreviewSlots.length
+                }
+                title={bulkScheduleDisabledReason ?? undefined}
+                onClick={() => setBulkModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
+              >
+                <Layers className="h-4 w-4" />
+                Bulk schedule
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => openCreateModal()}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+                New post
+              </button>
+            </div>
+            {bulkScheduleDisabledReason ? (
+              <p className="max-w-md text-right text-xs text-muted">
+                {bulkScheduleDisabledReason}
+              </p>
+            ) : null}
           </div>
 
           {viewMode === "week" ? (
