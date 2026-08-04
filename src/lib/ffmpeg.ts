@@ -191,17 +191,29 @@ export async function normalizeToReelFrame(options: {
 }): Promise<void> {
   await mkdir(path.dirname(options.outputPath), { recursive: true });
   const hasAudio = await hasAudioStream(options.inputPath);
+  const isProd = process.env.NODE_ENV === "production";
+  const encodeArgs = isProd
+    ? lowMemoryX264Args(22)
+    : [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+      ];
+
   await runFfmpeg([
+    ...(isProd ? lowMemoryFfmpegLeadIn() : []),
     "-i",
     options.inputPath,
     "-vf",
-    reelCoverScaleCropFilter(),
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "18",
+    isProd
+      ? `${reelCoverScaleCropFilter()},format=yuv420p`
+      : reelCoverScaleCropFilter(),
+    ...encodeArgs,
     ...(hasAudio ? ["-c:a", "aac", "-b:a", "128k"] : ["-an"]),
     "-movflags",
     "+faststart",
