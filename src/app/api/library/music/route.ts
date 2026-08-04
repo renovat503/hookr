@@ -6,6 +6,7 @@ import {
   guessAudioContentType,
   saveMediaBuffer,
 } from "@/lib/storage/media";
+import { getCampaign } from "@/lib/campaign-store";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,21 @@ export async function POST(request: Request) {
         { error: "Please upload an audio file (MP3, M4A, WAV, etc.)." },
         { status: 400 },
       );
+    }
+
+    const campaignIdRaw = form.get("campaignId");
+    const campaignId =
+      typeof campaignIdRaw === "string" && campaignIdRaw.trim()
+        ? campaignIdRaw.trim()
+        : null;
+    if (campaignId) {
+      const campaign = await getCampaign(campaignId);
+      if (!campaign) {
+        return NextResponse.json(
+          { error: "Campaign not found." },
+          { status: 404 },
+        );
+      }
     }
 
     const ext = path.extname(file.name) || ".mp3";
@@ -47,6 +63,7 @@ export async function POST(request: Request) {
       url,
       durationSeconds,
       uploadedAt: new Date().toISOString(),
+      campaignId,
     });
 
     return NextResponse.json(track);

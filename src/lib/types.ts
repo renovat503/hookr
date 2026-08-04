@@ -135,6 +135,8 @@ export type LibraryMusic = {
   url: string;
   durationSeconds: number;
   uploadedAt: string;
+  /** When set, track is owned by this campaign (not the global library). */
+  campaignId?: string | null;
 };
 
 export type ExportVariation = {
@@ -173,6 +175,8 @@ export type Campaign = {
   /** Mirror hook or demo selection from another campaign (never both). */
   borrowFromCampaignId?: string | null;
   borrowAssetKind?: CampaignBorrowAssetKind | null;
+  /** Reuse another campaign's uploaded music tracks. */
+  borrowMusicFromCampaignId?: string | null;
   /** Set when this campaign was created via Duplicate. */
   copiedFromCampaignId?: string | null;
   createdAt: string;

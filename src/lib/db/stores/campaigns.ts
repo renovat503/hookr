@@ -20,6 +20,7 @@ function rowToCampaign(row: typeof campaignsTable.$inferSelect): Campaign {
     randomFormat: row.randomFormat,
     borrowFromCampaignId: row.borrowFromCampaignId,
     borrowAssetKind: row.borrowAssetKind,
+    borrowMusicFromCampaignId: row.borrowMusicFromCampaignId,
     copiedFromCampaignId: row.copiedFromCampaignId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -76,6 +77,7 @@ export async function addCampaignPg(campaign: Campaign): Promise<Campaign> {
     randomFormat: next.randomFormat,
     borrowFromCampaignId: next.borrowFromCampaignId,
     borrowAssetKind: next.borrowAssetKind,
+    borrowMusicFromCampaignId: next.borrowMusicFromCampaignId,
     copiedFromCampaignId: next.copiedFromCampaignId,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt,
@@ -105,6 +107,10 @@ export async function updateCampaignPg(
       patch.borrowAssetKind !== undefined
         ? patch.borrowAssetKind
         : current.borrowAssetKind ?? null,
+    borrowMusicFromCampaignId:
+      patch.borrowMusicFromCampaignId !== undefined
+        ? patch.borrowMusicFromCampaignId
+        : current.borrowMusicFromCampaignId ?? null,
     copiedFromCampaignId:
       patch.copiedFromCampaignId !== undefined
         ? patch.copiedFromCampaignId
@@ -131,6 +137,7 @@ export async function updateCampaignPg(
       randomFormat: next.randomFormat,
       borrowFromCampaignId: next.borrowFromCampaignId,
       borrowAssetKind: next.borrowAssetKind,
+      borrowMusicFromCampaignId: next.borrowMusicFromCampaignId,
       copiedFromCampaignId: next.copiedFromCampaignId,
       updatedAt: next.updatedAt,
     })
@@ -149,6 +156,11 @@ export async function removeCampaignPg(id: string): Promise<boolean> {
       await updateCampaignPg(campaign.id, {
         borrowFromCampaignId: null,
         borrowAssetKind: null,
+      });
+    }
+    if (campaign.borrowMusicFromCampaignId === id) {
+      await updateCampaignPg(campaign.id, {
+        borrowMusicFromCampaignId: null,
       });
     }
   }
@@ -181,6 +193,7 @@ export async function writeCampaignsPg(data: CampaignsData): Promise<void> {
         randomFormat: next.randomFormat,
         borrowFromCampaignId: next.borrowFromCampaignId,
         borrowAssetKind: next.borrowAssetKind,
+        borrowMusicFromCampaignId: next.borrowMusicFromCampaignId,
         copiedFromCampaignId: next.copiedFromCampaignId,
         createdAt: next.createdAt,
         updatedAt: next.updatedAt,

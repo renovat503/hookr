@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCampaign, readCampaigns, updateCampaign } from "@/lib/campaign-store";
+import {
+  isMusicAvailableForCampaign,
+  normalizeCampaignAudioMode,
+} from "@/lib/campaign-music";
+import { readLibrary } from "@/lib/library-store";
 import type { CampaignAudioMode, CampaignBorrowAssetKind, CampaignStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -24,12 +29,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       demoIds?: string[];
       captionIds?: string[];
       useCaptions?: boolean;
-      audioMode?: CampaignAudioMode;
+      audioMode?: CampaignAudioMode | "campaign";
       musicId?: string | null;
       musicVolume?: number;
       randomFormat?: boolean;
       borrowFromCampaignId?: string | null;
       borrowAssetKind?: CampaignBorrowAssetKind | null;
+      borrowMusicFromCampaignId?: string | null;
       status?: CampaignStatus;
     };
 
@@ -41,13 +47,19 @@ export async function PATCH(request: Request, context: RouteContext) {
     const useCaptions =
       body.useCaptions !== undefined ? body.useCaptions : existing.useCaptions;
     const captionIds = body.captionIds ?? existing.captionIds;
-    const audioMode = body.audioMode ?? existing.audioMode;
+    const audioMode = body.audioMode
+      ? normalizeCampaignAudioMode(body.audioMode)
+      : existing.audioMode;
     const musicId =
       body.musicId !== undefined
         ? body.musicId
         : audioMode === "none"
           ? null
           : existing.musicId;
+    const borrowMusicFromCampaignId =
+      body.borrowMusicFromCampaignId !== undefined
+        ? body.borrowMusicFromCampaignId
+        : existing.borrowMusicFromCampaignId ?? null;
 
     if (useCaptions && captionIds.length === 0) {
       return NextResponse.json(
@@ -55,11 +67,43 @@ export async function PATCH(request: Request, context: RouteContext) {
         { status: 400 },
       );
     }
-    if (audioMode === "fixed" && !musicId) {
-      return NextResponse.json(
-        { error: "Pick a music track for fixed audio mode." },
-        { status: 400 },
-      );
+    if (borrowMusicFromCampaignId) {
+      if (borrowMusicFromCampaignId === id) {
+        return NextResponse.json(
+          { error: "A campaign cannot reuse its own music library." },
+          { status: 400 },
+        );
+      }
+      const borrowSource = await getCampaign(borrowMusicFromCampaignId);
+      if (!borrowSource) {
+        return NextResponse.json(
+          { error: "Selected music source campaign was not found." },
+          { status: 400 },
+        );
+      }
+    }
+    if (audioMode === "fixed" && musicId) {
+      const [library, { campaigns }] = await Promise.all([
+        readLibrary(),
+        readCampaigns(),
+      ]);
+      const track = library.music.find((item) => item.id === musicId);
+      if (!track) {
+        return NextResponse.json(
+          { error: "Selected music track was not found." },
+          { status: 400 },
+        );
+      }
+      const campaignForMusic = {
+        ...existing,
+        borrowMusicFromCampaignId,
+      };
+      if (!isMusicAvailableForCampaign(track, campaignForMusic, campaigns)) {
+        return NextResponse.json(
+          { error: "Selected track is not in this campaign's music library." },
+          { status: 400 },
+        );
+      }
     }
 
     if (
@@ -97,6 +141,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       musicId: audioMode === "none" ? null : musicId,
       musicVolume: body.musicVolume,
       randomFormat: body.randomFormat,
+      borrowMusicFromCampaignId,
       status: body.status,
     });
 

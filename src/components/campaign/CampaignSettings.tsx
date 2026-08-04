@@ -3,16 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Trash2 } from "lucide-react";
+import { Loader2, Save, Trash2, Upload } from "lucide-react";
 import type {
   Campaign,
   CampaignAudioMode,
   CampaignStatus,
   LibraryCaption,
   LibraryData,
+  LibraryMusic,
 } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { hooksOwnedByCampaign, hookCopyLabel } from "@/lib/campaign-hooks";
+import {
+  availableCampaignMusicTracks,
+  ownCampaignMusicTracks,
+  resolveMusicBorrowSource,
+} from "@/lib/campaign-music";
 import { isCompleteHook, cn } from "@/lib/utils";
 import { DEFAULT_MUSIC_VOLUME } from "@/lib/constants";
 
@@ -30,12 +36,17 @@ export function CampaignSettings() {
   const [musicId, setMusicId] = useState<string | null>(null);
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
   const [randomFormat, setRandomFormat] = useState(true);
+  const [borrowMusicFromCampaignId, setBorrowMusicFromCampaignId] = useState<
+    string | null
+  >(null);
   const [status, setStatus] = useState<CampaignStatus>("open");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploadingMusic, setUploadingMusic] = useState(false);
+  const [deletingMusicId, setDeletingMusicId] = useState<string | null>(null);
 
   const applyCampaign = useCallback((c: Campaign) => {
     setCampaign(c);
@@ -47,6 +58,7 @@ export function CampaignSettings() {
     setMusicId(c.musicId);
     setMusicVolume(c.musicVolume);
     setRandomFormat(c.randomFormat);
+    setBorrowMusicFromCampaignId(c.borrowMusicFromCampaignId ?? null);
     setStatus(c.status ?? "open");
   }, []);
 
@@ -105,8 +117,124 @@ export function CampaignSettings() {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
   };
 
-  const save = async () => {
-    if (!campaign) return;
+  const campaignForMusic = campaign
+    ? { ...campaign, borrowMusicFromCampaignId }
+    : null;
+  const ownMusic = campaign
+    ? ownCampaignMusicTracks(library?.music ?? [], campaign.id)
+    : [];
+  const musicBorrowSource = campaignForMusic
+    ? resolveMusicBorrowSource(campaignForMusic, campaigns)
+    : null;
+  const borrowedMusic =
+    campaignForMusic && musicBorrowSource
+      ? ownCampaignMusicTracks(library?.music ?? [], musicBorrowSource.id)
+      : [];
+  const availableMusic =
+    campaignForMusic && library
+      ? availableCampaignMusicTracks(campaignForMusic, library.music, campaigns)
+      : [];
+  const otherCampaigns = campaigns.filter((c) => c.id !== campaign?.id);
+
+  const handleCampaignMusicUpload = async (file: File | undefined) => {
+    if (!file || !campaign) return;
+    if (!file.type.startsWith("audio/")) {
+      setError("Please upload an audio file.");
+      return;
+    }
+
+    setUploadingMusic(true);
+    setError(null);
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      const audio = document.createElement("audio");
+      audio.preload = "metadata";
+      const durationSeconds = await new Promise<number>((resolve) => {
+        audio.onloadedmetadata = () =>
+          resolve(Math.max(1, Math.round(audio.duration || 0)));
+        audio.onerror = () => resolve(0);
+        audio.src = blobUrl;
+      });
+      URL.revokeObjectURL(blobUrl);
+
+      const form = new FormData();
+      form.append("file", file);
+      form.append("durationSeconds", String(durationSeconds));
+      form.append("campaignId", campaign.id);
+
+      const res = await fetch("/api/library/music", {
+        method: "POST",
+        body: form,
+      });
+      const json = (await res.json()) as LibraryMusic & { error?: string };
+      if (!res.ok) throw new Error(json.error || "Upload failed.");
+
+      setLibrary((prev) =>
+        prev
+          ? { ...prev, music: [json, ...prev.music] }
+          : {
+              hooks: [],
+              demos: [],
+              motions: [],
+              music: [json],
+              characters: [],
+              exports: [],
+            },
+      );
+      setSaved(false);
+      setMusicId(json.id);
+      await save({
+        musicId: json.id,
+        audioMode: audioMode === "none" ? "fixed" : audioMode,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploadingMusic(false);
+    }
+  };
+
+  const deleteCampaignMusic = async (id: string, name: string) => {
+    if (!window.confirm(`Delete “${name}” from this campaign?`)) return;
+    setDeletingMusicId(id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/library/music?id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Could not delete track.");
+
+      setLibrary((prev) =>
+        prev
+          ? { ...prev, music: prev.music.filter((track) => track.id !== id) }
+          : prev,
+      );
+      if (musicId === id) {
+        setMusicId(null);
+      }
+      setSaved(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete track.");
+    } finally {
+      setDeletingMusicId(null);
+    }
+  };
+
+  const save = async (overrides?: {
+    audioMode?: CampaignAudioMode;
+    musicId?: string | null;
+    borrowMusicFromCampaignId?: string | null;
+  }) => {
+    if (!campaign) return false;
+    const nextAudioMode = overrides?.audioMode ?? audioMode;
+    const nextMusicId =
+      overrides?.musicId !== undefined ? overrides.musicId : musicId;
+    const nextBorrowMusicFromCampaignId =
+      overrides?.borrowMusicFromCampaignId !== undefined
+        ? overrides.borrowMusicFromCampaignId
+        : borrowMusicFromCampaignId;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -119,10 +247,11 @@ export function CampaignSettings() {
           demoIds,
           captionIds: useCaptions ? captionIds : [],
           useCaptions,
-          audioMode,
-          musicId: audioMode === "none" ? null : musicId,
+          audioMode: nextAudioMode,
+          musicId: nextAudioMode === "none" ? null : nextMusicId,
           musicVolume,
           randomFormat,
+          borrowMusicFromCampaignId: nextBorrowMusicFromCampaignId,
           status,
         }),
       });
@@ -130,8 +259,10 @@ export function CampaignSettings() {
       if (!res.ok) throw new Error(json.error || "Could not save settings.");
       applyCampaign(json);
       setSaved(true);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save settings.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -370,7 +501,7 @@ export function CampaignSettings() {
         {(
           [
             ["none", "No sound (add trending audio in Instagram)"],
-            ["random", "Random track from library"],
+            ["random", "Random track from campaign library"],
             ["fixed", "Fixed music track"],
           ] as const
         ).map(([mode, label]) => (
@@ -382,6 +513,15 @@ export function CampaignSettings() {
               onChange={() => {
                 setSaved(false);
                 setAudioMode(mode);
+                if (mode === "none") {
+                  setMusicId(null);
+                } else if (mode === "fixed") {
+                  setMusicId((current) =>
+                    current && availableMusic.some((track) => track.id === current)
+                      ? current
+                      : null,
+                  );
+                }
               }}
             />
             {label}
@@ -397,9 +537,12 @@ export function CampaignSettings() {
             className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm"
           >
             <option value="">Select track</option>
-            {(library?.music ?? []).map((m) => (
+            {availableMusic.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
+                {borrowedMusic.some((track) => track.id === m.id)
+                  ? ` (${musicBorrowSource?.name ?? "borrowed"})`
+                  : ""}
               </option>
             ))}
           </select>
@@ -423,6 +566,104 @@ export function CampaignSettings() {
           </div>
         )}
       </div>
+
+      {campaign && (
+        <div className="space-y-3">
+          <p className="text-xs font-medium text-muted">Campaign music library</p>
+          <p className="text-xs text-muted">
+            Each campaign starts with an empty library. Upload tracks here or
+            reuse music from another campaign.
+          </p>
+          <div className="space-y-3 rounded-xl border border-border-subtle bg-background/40 p-3">
+            <div>
+              <label className="mb-1 block text-xs text-muted">
+                Reuse music from
+              </label>
+              <select
+                value={borrowMusicFromCampaignId ?? ""}
+                onChange={(e) => {
+                  const nextId = e.target.value || null;
+                  setSaved(false);
+                  setBorrowMusicFromCampaignId(nextId);
+                  setMusicId((current) =>
+                    current &&
+                    availableCampaignMusicTracks(
+                      { ...campaign, borrowMusicFromCampaignId: nextId },
+                      library?.music ?? [],
+                      campaigns,
+                    ).some((track) => track.id === current)
+                      ? current
+                      : null,
+                  );
+                }}
+                className="w-full rounded-xl border border-border-subtle bg-background px-3 py-2 text-sm"
+              >
+                <option value="">None (this campaign only)</option>
+                {otherCampaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border-subtle px-3 py-2 text-sm hover:bg-surface-hover">
+              <Upload className="h-4 w-4" />
+              {uploadingMusic ? "Uploading…" : "Upload track"}
+              <input
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                disabled={uploadingMusic}
+                onChange={(e) => {
+                  void handleCampaignMusicUpload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {ownMusic.length > 0 ? (
+              <ul className="space-y-1">
+                {ownMusic.map((track) => (
+                  <li
+                    key={track.id}
+                    className="flex items-center justify-between gap-2 text-xs text-muted"
+                  >
+                    <span className="truncate">{track.name}</span>
+                    <button
+                      type="button"
+                      disabled={deletingMusicId === track.id}
+                      onClick={() => void deleteCampaignMusic(track.id, track.name)}
+                      className="shrink-0 rounded p-1 text-muted hover:text-red-400 disabled:opacity-50"
+                      aria-label={`Delete ${track.name}`}
+                    >
+                      {deletingMusicId === track.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted">No tracks uploaded yet.</p>
+            )}
+            {borrowedMusic.length > 0 && musicBorrowSource && (
+              <div className="space-y-1 border-t border-border-subtle pt-3">
+                <p className="text-xs text-muted">
+                  Borrowed from {musicBorrowSource.name}
+                </p>
+                <ul className="space-y-1">
+                  {borrowedMusic.map((track) => (
+                    <li key={track.id} className="truncate text-xs text-muted">
+                      {track.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

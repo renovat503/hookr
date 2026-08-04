@@ -43,6 +43,7 @@ export const campaigns = pgTable("campaigns", {
   randomFormat: boolean("random_format").notNull().default(true),
   borrowFromCampaignId: text("borrow_from_campaign_id"),
   borrowAssetKind: text("borrow_asset_kind").$type<CampaignBorrowAssetKind | null>(),
+  borrowMusicFromCampaignId: text("borrow_music_from_campaign_id"),
   copiedFromCampaignId: text("copied_from_campaign_id"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .notNull()
@@ -100,6 +101,7 @@ export const music = pgTable("music", {
   name: text("name").notNull(),
   url: text("url").notNull(),
   durationSeconds: integer("duration_seconds").notNull().default(0),
+  campaignId: text("campaign_id"),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: "string" })
     .notNull()
     .defaultNow(),

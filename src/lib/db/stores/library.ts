@@ -68,6 +68,7 @@ function rowToMusic(row: typeof musicTable.$inferSelect): LibraryMusic {
     url: row.url,
     durationSeconds: row.durationSeconds,
     uploadedAt: row.uploadedAt,
+    campaignId: row.campaignId,
   };
 }
 
@@ -160,12 +161,20 @@ export async function readLibraryPgForAssets(
         .orderBy(desc(hooksTable.createdAt))
     : Promise.resolve([] as (typeof hooksTable.$inferSelect)[]);
 
+  const musicQuery = campaignId
+    ? db
+        .select()
+        .from(musicTable)
+        .where(eq(musicTable.campaignId, campaignId))
+        .orderBy(desc(musicTable.uploadedAt))
+    : Promise.resolve([] as (typeof musicTable.$inferSelect)[]);
+
   const [hookRows, demoRows, motionRows, musicRows, characterRows] =
     await Promise.all([
       hookQuery,
       db.select().from(demosTable).orderBy(desc(demosTable.uploadedAt)),
       db.select().from(motionsTable).orderBy(desc(motionsTable.uploadedAt)),
-      db.select().from(musicTable).orderBy(desc(musicTable.uploadedAt)),
+      musicQuery,
       db.select().from(charactersTable).orderBy(desc(charactersTable.uploadedAt)),
     ]);
 
@@ -315,6 +324,7 @@ export async function writeLibraryPg(data: LibraryData): Promise<void> {
         name: track.name,
         url: track.url,
         durationSeconds: track.durationSeconds,
+        campaignId: track.campaignId ?? null,
         uploadedAt: track.uploadedAt,
       })),
     );
@@ -420,6 +430,7 @@ export async function addMusicPg(track: LibraryMusic): Promise<LibraryMusic> {
     name: track.name,
     url: track.url,
     durationSeconds: track.durationSeconds,
+    campaignId: track.campaignId ?? null,
     uploadedAt: track.uploadedAt,
   });
   return track;

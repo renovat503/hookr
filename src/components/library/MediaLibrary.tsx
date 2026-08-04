@@ -341,6 +341,10 @@ export function MediaLibrary({
 
   const handleMusicUpload = async (file: File | undefined) => {
     if (!file) return;
+    if (!activeCampaign) {
+      setError("Select a campaign before uploading music.");
+      return;
+    }
     if (!file.type.startsWith("audio/")) {
       setError("Please upload an audio file.");
       return;
@@ -363,6 +367,7 @@ export function MediaLibrary({
       const form = new FormData();
       form.append("file", file, safeUploadFilename(file.name, "upload.mp3"));
       form.append("durationSeconds", String(durationSeconds));
+      form.append("campaignId", activeCampaign.id);
 
       const res = await fetch("/api/library/music", {
         method: "POST",
@@ -921,12 +926,23 @@ export function MediaLibrary({
         </div>
       ) : tab === "music" ? (
         <div className="space-y-4">
+          {activeCampaign ? (
+            <p className="text-xs text-muted">
+              Music for <span className="font-medium text-foreground">{activeCampaign.name}</span> only.
+              New campaigns start empty unless you reuse music in campaign settings.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Select a campaign to manage its music library.
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-end gap-2">
             <input
               ref={musicFileRef}
               type="file"
               accept="audio/mpeg,audio/mp4,audio/wav,audio/*"
               className="hidden"
+              disabled={!activeCampaign}
               onChange={(e) => {
                 void handleMusicUpload(e.target.files?.[0]);
                 e.currentTarget.value = "";
@@ -936,11 +952,23 @@ export function MediaLibrary({
               label="Upload music"
               icon={Music2}
               loading={uploadingMusic}
-              onClick={() => musicFileRef.current?.click()}
+              onClick={() => {
+                if (!activeCampaign) {
+                  setError("Select a campaign before uploading music.");
+                  return;
+                }
+                musicFileRef.current?.click();
+              }}
             />
           </div>
 
-          {data?.music.length ? (
+          {!activeCampaign ? (
+            <EmptyState
+              icon={Music2}
+              title="No active campaign"
+              hint="Choose a campaign from the sidebar or campaigns page, then upload music for that campaign."
+            />
+          ) : data?.music.length ? (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {data.music.map((track) => (
               <li
@@ -990,8 +1018,8 @@ export function MediaLibrary({
         ) : (
           <EmptyState
             icon={Music2}
-            title="No background tracks yet"
-            hint="Upload MP3, M4A, or WAV files with the button above. Use royalty-free music you have rights to."
+            title="No tracks for this campaign"
+            hint="Upload MP3, M4A, or WAV files for this campaign, or reuse music from another campaign in campaign settings."
           />
         )}
         </div>

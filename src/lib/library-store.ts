@@ -180,6 +180,7 @@ export async function readLibrary(
       data = {
         ...data,
         hooks: data.hooks.filter((h) => h.campaignId === options.campaignId),
+        music: data.music.filter((m) => m.campaignId === options.campaignId),
       };
     } else if (scope === "exports" || scope === "produce") {
       data = {
@@ -189,6 +190,8 @@ export async function readLibrary(
         ),
       };
     }
+  } else if (scope === "assets") {
+    data = { ...data, music: [] };
   }
   return normalizeLibrary(data);
 }

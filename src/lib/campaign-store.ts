@@ -14,6 +14,7 @@ import {
   writeCampaignsPg,
 } from "@/lib/db/stores/campaigns";
 import { copyHooksToCampaign } from "@/lib/copy-hooks-to-campaign";
+import { normalizeCampaignAudioMode } from "./campaign-music";
 import type { Campaign, CampaignsData } from "./types";
 import { DEFAULT_MUSIC_VOLUME } from "./constants";
 
@@ -49,10 +50,9 @@ function normalizeCampaign(raw: unknown): Campaign | null {
       ? item.captionIds.filter((id): id is string => typeof id === "string")
       : [],
     useCaptions: Boolean(item.useCaptions),
-    audioMode:
-      item.audioMode === "random" || item.audioMode === "fixed"
-        ? item.audioMode
-        : "none",
+    audioMode: normalizeCampaignAudioMode(
+      typeof item.audioMode === "string" ? item.audioMode : undefined,
+    ),
     musicId: typeof item.musicId === "string" ? item.musicId : null,
     musicVolume:
       typeof item.musicVolume === "number"
@@ -66,6 +66,10 @@ function normalizeCampaign(raw: unknown): Campaign | null {
     borrowAssetKind:
       item.borrowAssetKind === "hooks" || item.borrowAssetKind === "demos"
         ? item.borrowAssetKind
+        : null,
+    borrowMusicFromCampaignId:
+      typeof item.borrowMusicFromCampaignId === "string"
+        ? item.borrowMusicFromCampaignId
         : null,
     copiedFromCampaignId:
       typeof item.copiedFromCampaignId === "string"
@@ -172,6 +176,7 @@ export async function addCampaign(
     randomFormat: input.randomFormat,
     borrowFromCampaignId: input.borrowFromCampaignId ?? null,
     borrowAssetKind: input.borrowAssetKind ?? null,
+    borrowMusicFromCampaignId: input.borrowMusicFromCampaignId ?? null,
     copiedFromCampaignId: input.copiedFromCampaignId ?? null,
     status: input.status ?? "open",
     createdAt: now,
@@ -238,6 +243,10 @@ export async function updateCampaign(
       patch.borrowAssetKind !== undefined
         ? patch.borrowAssetKind
         : current.borrowAssetKind ?? null,
+    borrowMusicFromCampaignId:
+      patch.borrowMusicFromCampaignId !== undefined
+        ? patch.borrowMusicFromCampaignId
+        : current.borrowMusicFromCampaignId ?? null,
     copiedFromCampaignId:
       patch.copiedFromCampaignId !== undefined
         ? patch.copiedFromCampaignId
@@ -263,11 +272,20 @@ export async function removeCampaign(id: string): Promise<boolean> {
         const data = await readCampaignsJson();
         const campaigns = data.campaigns
           .filter((c) => c.id !== id)
-          .map((c) =>
-            c.borrowFromCampaignId === id
-              ? { ...c, borrowFromCampaignId: null, borrowAssetKind: null }
-              : c,
-          );
+          .map((c) => {
+            let next = c;
+            if (c.borrowFromCampaignId === id) {
+              next = {
+                ...next,
+                borrowFromCampaignId: null,
+                borrowAssetKind: null,
+              };
+            }
+            if (c.borrowMusicFromCampaignId === id) {
+              next = { ...next, borrowMusicFromCampaignId: null };
+            }
+            return next;
+          });
         await writeCampaignsJson({ campaigns });
       }
       if (ok || !usesJsonWrite()) return ok;
@@ -281,11 +299,16 @@ export async function removeCampaign(id: string): Promise<boolean> {
   if (!data.campaigns.some((c) => c.id === id)) return false;
   const campaigns = data.campaigns
     .filter((c) => c.id !== id)
-    .map((c) =>
-      c.borrowFromCampaignId === id
-        ? { ...c, borrowFromCampaignId: null, borrowAssetKind: null }
-        : c,
-    );
+    .map((c) => {
+      let next = c;
+      if (c.borrowFromCampaignId === id) {
+        next = { ...next, borrowFromCampaignId: null, borrowAssetKind: null };
+      }
+      if (c.borrowMusicFromCampaignId === id) {
+        next = { ...next, borrowMusicFromCampaignId: null };
+      }
+      return next;
+    });
   if (usesJsonWrite()) {
     await writeCampaignsJson({ campaigns });
   }
@@ -318,12 +341,13 @@ export async function duplicateCampaign(
     demoIds: [...source.demoIds],
     captionIds: [...source.captionIds],
     useCaptions: source.useCaptions,
-    audioMode: source.audioMode,
-    musicId: source.musicId,
+    audioMode: normalizeCampaignAudioMode(source.audioMode),
+    musicId: null,
     musicVolume: source.musicVolume,
     randomFormat: source.randomFormat,
     borrowFromCampaignId: null,
     borrowAssetKind: null,
+    borrowMusicFromCampaignId: null,
     copiedFromCampaignId: sourceId,
   });
 

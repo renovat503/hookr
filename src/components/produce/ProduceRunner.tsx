@@ -9,6 +9,10 @@ import { loadFormatPresets } from "@/lib/format-presets";
 import type { Campaign, LibraryData } from "@/lib/types";
 import type { ProduceCombo } from "@/lib/produce-combos";
 import { mergeCampaignAssets, resolveBorrowSource } from "@/lib/campaign-assets";
+import {
+  availableCampaignMusicTracks,
+  pickRandomMusicId,
+} from "@/lib/campaign-music";
 import { hooksOwnedByCampaign } from "@/lib/campaign-hooks";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { cn, friendlyFetchError, isCompleteHook } from "@/lib/utils";
@@ -202,6 +206,11 @@ export function ProduceRunner() {
   const maxComboEstimate = hookCount * demoCount;
   const campaignClosed = campaign ? isCampaignClosed(campaign) : false;
 
+  const availableMusic = useMemo(() => {
+    if (!campaign || !library) return [];
+    return availableCampaignMusicTracks(campaign, library.music, campaigns);
+  }, [campaign, library, campaigns]);
+
   const canRun = useMemo(
     () =>
       Boolean(
@@ -214,11 +223,10 @@ export function ProduceRunner() {
           exportEstimate > 0 &&
           !planning &&
           demoMediaOk !== false &&
-          (campaign.audioMode !== "random" ||
-            (library.music.length ?? 0) > 0) &&
+          (campaign.audioMode !== "random" || availableMusic.length > 0) &&
           (campaign.audioMode !== "fixed" || campaign.musicId),
       ),
-    [campaign, library, campaignClosed, planReady, hookCount, demoCount, exportEstimate, planning, demoMediaOk],
+    [campaign, library, campaignClosed, planReady, hookCount, demoCount, exportEstimate, planning, demoMediaOk, availableMusic.length],
   );
 
   const pickRandomFormat = () => {
@@ -231,8 +239,7 @@ export function ProduceRunner() {
     if (!campaign || !library) return null;
     if (campaign.audioMode === "none") return null;
     if (campaign.audioMode === "fixed") return campaign.musicId;
-    if (!library.music.length) return null;
-    return library.music[Math.floor(Math.random() * library.music.length)].id;
+    return pickRandomMusicId(availableMusic);
   };
 
   const runProduction = async () => {
@@ -373,7 +380,8 @@ export function ProduceRunner() {
 
   const needsSetup =
     (campaign.useCaptions && !campaign.captionIds.length) ||
-    (campaign.audioMode === "fixed" && !campaign.musicId);
+    (campaign.audioMode === "fixed" && !campaign.musicId) ||
+    (campaign.audioMode === "random" && availableMusic.length === 0);
 
   const missingHooks = !mergedAssets?.hookIds.length;
   const missingDemos = !mergedAssets?.demoIds.length;
@@ -391,6 +399,9 @@ export function ProduceRunner() {
           )}
           {campaign.audioMode === "fixed" && !campaign.musicId && (
             <li>· Fixed audio mode but no track selected</li>
+          )}
+          {campaign.audioMode === "random" && availableMusic.length === 0 && (
+            <li>· Random music enabled but campaign library is empty</li>
           )}
         </ul>
         <Link
@@ -476,7 +487,7 @@ export function ProduceRunner() {
               {campaign.audioMode === "none"
                 ? "Silent exports"
                 : campaign.audioMode === "random"
-                  ? "Random music"
+                  ? "Random campaign music"
                   : "Fixed music track"}{" "}
               ·{" "}
               {campaign.useCaptions
