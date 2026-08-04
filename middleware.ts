@@ -11,6 +11,7 @@ function isPublic(pathname: string): boolean {
   if (pathname === "/api/auth/login") return true;
   if (pathname === "/api/health") return true;
   if (pathname.startsWith("/api/instagram/callback")) return true;
+  if (pathname.startsWith("/api/youtube/callback")) return true;
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||

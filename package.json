@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",
+    "db:security": "node scripts/apply-security-sql.mjs --automated-only",
     "db:studio": "drizzle-kit studio",
     "migrate:cloud": "node scripts/migrate-to-cloud.mjs",
     "migrate:cloud:dry-run": "node scripts/migrate-to-cloud.mjs --dry-run",
