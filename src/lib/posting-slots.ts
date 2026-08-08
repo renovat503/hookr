@@ -290,3 +290,35 @@ export function previewBulkSchedule(
 ): ScheduleSlot[] {
   return getNextAvailableSlots(slotTimes, occupied, exportCount, new Date(), maxDays);
 }
+
+/** Statuses safe to bulk-unschedule (soft-cancel). */
+export const BULK_UNSCHEDULE_STATUSES = new Set([
+  "queued",
+  "scheduled",
+  "failed",
+]);
+
+/**
+ * Posts for an account whose local calendar day falls in [fromDateIso, toDateIso]
+ * (inclusive) and whose status is in `statuses` (defaults to bulk-unschedule set).
+ */
+export function postsInDateRange<T extends SlotScheduledPost>(
+  posts: T[],
+  accountId: string,
+  fromDateIso: string,
+  toDateIso: string,
+  timezoneOffsetMinutes: number,
+  statuses: Set<string> = BULK_UNSCHEDULE_STATUSES,
+): T[] {
+  if (!fromDateIso || !toDateIso || fromDateIso > toDateIso) return [];
+
+  return posts.filter((post) => {
+    if (post.accountId !== accountId) return false;
+    if (!statuses.has(post.status)) return false;
+    const { dateIso } = getSchedulePartsInOffset(
+      post.scheduledAt,
+      timezoneOffsetMinutes,
+    );
+    return dateIso >= fromDateIso && dateIso <= toDateIso;
+  });
+}

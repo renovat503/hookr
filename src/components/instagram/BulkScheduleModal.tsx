@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { ReelPlayer } from "@/components/ui/ReelPlayer";
 import { resolveScheduleCaption } from "@/lib/instagram-queue";
+import { minScheduleDateIso } from "@/lib/calendar-utils";
 import { formatSlotTimeLabel, type ScheduleSlot } from "@/lib/posting-slots";
 import type { LibraryExport } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,8 @@ type BulkScheduleModalProps = {
   accountUsername: string;
   exports: LibraryExport[];
   previewSlots: ScheduleSlot[];
+  startDateIso: string;
+  onStartDateChange: (dateIso: string) => void;
   onClose: () => void;
   onConfirm: (
     assignments: BulkScheduleAssignment[],
@@ -50,6 +53,8 @@ export function BulkScheduleModal({
   accountUsername,
   exports,
   previewSlots,
+  startDateIso,
+  onStartDateChange,
   onClose,
   onConfirm,
 }: BulkScheduleModalProps) {
@@ -88,6 +93,22 @@ export function BulkScheduleModal({
       setDefaultCaption("");
     }
   }, [open, accountId]);
+
+  // Slot assignments shift when the start date changes.
+  useEffect(() => {
+    if (!open) return;
+    setSelected((current) => {
+      if (!current.length) return current;
+      if (current.length <= previewSlots.length) return current;
+      return current.slice(0, previewSlots.length);
+    });
+  }, [open, startDateIso, previewSlots.length]);
+
+  const handleStartDateChange = (value: string) => {
+    onStartDateChange(value);
+    setSelected([]);
+    setError(null);
+  };
 
   const persistDefaultCaption = (value: string) => {
     if (!accountId) return;
@@ -237,7 +258,7 @@ export function BulkScheduleModal({
           <div>
             <h2 className="text-sm font-semibold">Bulk schedule</h2>
             <p className="text-xs text-muted">
-              @{accountUsername} · fills the next open calendar slots
+              @{accountUsername} · fills open slots starting from your chosen date
             </p>
           </div>
           <button
@@ -255,6 +276,25 @@ export function BulkScheduleModal({
               {error}
             </p>
           ) : null}
+
+          <div className="space-y-1.5">
+            <label htmlFor="bulk-start-date" className="text-sm font-medium">
+              Start date
+            </label>
+            <input
+              id="bulk-start-date"
+              type="date"
+              value={startDateIso}
+              min={minScheduleDateIso()}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+              disabled={busy}
+              className="w-full rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm outline-none ring-accent focus:ring-2 disabled:opacity-50 sm:max-w-xs"
+            />
+            <p className="text-xs text-muted">
+              Posts fill the next open goal slots on and after this day. Earlier
+              open slots are skipped.
+            </p>
+          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">

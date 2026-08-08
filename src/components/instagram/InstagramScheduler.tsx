@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarDays,
+  CalendarX2,
   ChevronDown,
   Clapperboard,
   Layers,
@@ -15,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { BulkScheduleModal } from "@/components/instagram/BulkScheduleModal";
+import { BulkUnscheduleModal } from "@/components/instagram/BulkUnscheduleModal";
 import { PostingGoalPanel } from "@/components/instagram/PostingGoalPanel";
 import {
   ScheduleCalendar,
@@ -26,12 +28,14 @@ import {
   defaultScheduleDateTime,
   DRAG_QUEUE_MIME,
   isPastDay,
+  minScheduleDateIso,
   moveScheduledTimeToDate,
   startOfMonth,
   validateScheduleInstant,
 } from "@/lib/calendar-utils";
 import {
   bulkScheduleHorizonDays,
+  BULK_UNSCHEDULE_STATUSES,
   getNextAvailableSlots,
   getOccupiedSlotKeys,
   getOccupiedSlotKeysForBulk,
@@ -78,6 +82,10 @@ export function InstagramScheduler() {
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkUnscheduleOpen, setBulkUnscheduleOpen] = useState(false);
+  const [bulkStartDateIso, setBulkStartDateIso] = useState(() =>
+    minScheduleDateIso(),
+  );
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [modalDate, setModalDate] = useState<Date | undefined>();
   const [modalTime, setModalTime] = useState<string | undefined>();
@@ -142,6 +150,15 @@ export function InstagramScheduler() {
 
   const unscheduledQueue = activeQueue?.queue ?? [];
 
+  const cancellablePostCount = useMemo(() => {
+    if (!data || !activeAccountId) return 0;
+    return data.scheduledPosts.filter(
+      (post) =>
+        post.accountId === activeAccountId &&
+        BULK_UNSCHEDULE_STATUSES.has(post.status),
+    ).length;
+  }, [data, activeAccountId]);
+
   const activePostingGoal = useMemo(
     () =>
       getPostingGoalForAccount(data?.postingGoals, activeAccountId),
@@ -175,13 +192,19 @@ export function InstagramScheduler() {
     [availableExports.length, activePostingGoal.slotTimes.length],
   );
 
+  const bulkStartDate = useMemo(() => {
+    const [y, m, d] = bulkStartDateIso.split("-").map(Number);
+    if (!y || !m || !d) return new Date();
+    return new Date(y, m - 1, d);
+  }, [bulkStartDateIso]);
+
   const bulkPreviewSlots = useMemo(() => {
     if (!availableExports.length) return [];
     return getNextAvailableSlots(
       activePostingGoal.slotTimes,
       bulkOccupiedSlots,
       Math.min(availableExports.length, 60),
-      new Date(),
+      bulkStartDate,
       bulkPreviewMaxDays,
     );
   }, [
@@ -189,6 +212,7 @@ export function InstagramScheduler() {
     bulkOccupiedSlots,
     availableExports.length,
     bulkPreviewMaxDays,
+    bulkStartDate,
   ]);
 
   const bulkScheduleDisabledReason = useMemo(() => {
@@ -469,6 +493,42 @@ export function InstagramScheduler() {
     }
   };
 
+  const bulkUnschedule = async (fromDateIso: string, toDateIso: string) => {
+    if (!activeAccountId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/instagram/schedule/bulk-cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(60_000),
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          fromDateIso,
+          toDateIso,
+          timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        cancelled?: number;
+      };
+      if (!res.ok) throw new Error(json.error || "Bulk unschedule failed.");
+      const count = json.cancelled ?? 0;
+      setNotice(
+        count
+          ? `Unscheduled ${count} post${count === 1 ? "" : "s"}.`
+          : "No posts were unscheduled.",
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Bulk unschedule failed.");
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-muted">
@@ -631,13 +691,25 @@ export function InstagramScheduler() {
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
+                disabled={busy || !cancellablePostCount}
+                onClick={() => setBulkUnscheduleOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-danger/30 bg-surface-raised px-3 py-2 text-sm font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+              >
+                <CalendarX2 className="h-4 w-4" />
+                Unschedule…
+              </button>
+              <button
+                type="button"
                 disabled={
                   busy ||
                   !availableExports.length ||
                   !bulkPreviewSlots.length
                 }
                 title={bulkScheduleDisabledReason ?? undefined}
-                onClick={() => setBulkModalOpen(true)}
+                onClick={() => {
+                  setBulkStartDateIso(minScheduleDateIso());
+                  setBulkModalOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface-raised px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
               >
                 <Layers className="h-4 w-4" />
@@ -874,8 +946,22 @@ export function InstagramScheduler() {
         accountUsername={activeAccount?.username ?? ""}
         exports={availableExports}
         previewSlots={bulkPreviewSlots}
-        onClose={() => setBulkModalOpen(false)}
+        startDateIso={bulkStartDateIso}
+        onStartDateChange={setBulkStartDateIso}
+        onClose={() => {
+          setBulkModalOpen(false);
+          setBulkStartDateIso(minScheduleDateIso());
+        }}
         onConfirm={bulkSchedule}
+      />
+
+      <BulkUnscheduleModal
+        open={bulkUnscheduleOpen}
+        accountId={activeAccountId}
+        accountUsername={activeAccount?.username ?? ""}
+        posts={data.scheduledPosts}
+        onClose={() => setBulkUnscheduleOpen(false)}
+        onConfirm={bulkUnschedule}
       />
     </div>
   );
