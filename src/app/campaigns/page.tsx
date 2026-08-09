@@ -8,11 +8,17 @@ import type { Campaign } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { cn, friendlyFetchError } from "@/lib/utils";
 
+type CampaignListItem = Campaign & {
+  scheduledCount?: number;
+  scheduledInstagram?: number;
+  scheduledYouTube?: number;
+};
+
 function CampaignsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activating, setActivating] = useState<string | null>(null);
@@ -27,7 +33,7 @@ function CampaignsContent() {
         signal: AbortSignal.timeout(35_000),
       });
       const json = (await res.json()) as {
-        campaigns?: Campaign[];
+        campaigns?: CampaignListItem[];
         activeId?: string | null;
         error?: string;
       };
@@ -212,6 +218,10 @@ function CampaignsContent() {
                     : c.audioMode === "random"
                       ? "random music"
                       : "fixed track"}
+                  {" · "}
+                  {(c.scheduledCount ?? 0) === 0
+                    ? "0 scheduled"
+                    : `${c.scheduledCount ?? 0} scheduled (${c.scheduledInstagram ?? 0} IG · ${c.scheduledYouTube ?? 0} YT)`}
                 </p>
                 {activeId === c.id && (
                   <span className="mt-1 inline-block text-xs font-medium text-accent">

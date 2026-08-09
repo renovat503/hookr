@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   CAMPAIGN_COOKIE,
   campaignCookieOptions,
@@ -7,7 +8,13 @@ import {
   isSecureRequest,
 } from "@/lib/auth-session";
 import { resolveActiveCampaign } from "@/lib/active-campaign";
+import { usesPostgresRead } from "@/lib/config/storage-mode";
+import { getDb } from "@/lib/db/client";
 import { formatPgError } from "@/lib/db/connection-url";
+import {
+  scheduledPosts as scheduledPostsTable,
+  youtubeScheduledPosts as youtubeScheduledPostsTable,
+} from "@/lib/db/schema";
 import {
   addCampaign,
   readCampaigns,
@@ -18,12 +25,75 @@ import type { CampaignAudioMode, CampaignBorrowAssetKind } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+async function scheduledCountsByCampaign(
+  campaignIds: string[],
+): Promise<Record<string, { instagram: number; youtube: number; total: number }>> {
+  const empty = Object.fromEntries(
+    campaignIds.map((id) => [id, { instagram: 0, youtube: 0, total: 0 }]),
+  ) as Record<string, { instagram: number; youtube: number; total: number }>;
+
+  if (!campaignIds.length || !usesPostgresRead()) return empty;
+
+  const db = getDb();
+  const [igRows, ytRows] = await Promise.all([
+    db
+      .select({
+        campaignId: scheduledPostsTable.campaignId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(scheduledPostsTable)
+      .where(
+        and(
+          inArray(scheduledPostsTable.campaignId, campaignIds),
+          eq(scheduledPostsTable.status, "scheduled"),
+        ),
+      )
+      .groupBy(scheduledPostsTable.campaignId),
+    db
+      .select({
+        campaignId: youtubeScheduledPostsTable.campaignId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(youtubeScheduledPostsTable)
+      .where(
+        and(
+          inArray(youtubeScheduledPostsTable.campaignId, campaignIds),
+          eq(youtubeScheduledPostsTable.status, "scheduled"),
+        ),
+      )
+      .groupBy(youtubeScheduledPostsTable.campaignId),
+  ]);
+
+  for (const row of igRows) {
+    if (!row.campaignId || !empty[row.campaignId]) continue;
+    empty[row.campaignId].instagram = Number(row.count) || 0;
+  }
+  for (const row of ytRows) {
+    if (!row.campaignId || !empty[row.campaignId]) continue;
+    empty[row.campaignId].youtube = Number(row.count) || 0;
+  }
+  for (const id of campaignIds) {
+    const entry = empty[id]!;
+    entry.total = entry.instagram + entry.youtube;
+  }
+  return empty;
+}
+
 export async function GET() {
   try {
     const data = await readCampaigns();
     const activeCampaign = await resolveActiveCampaign();
+    const counts = await scheduledCountsByCampaign(
+      data.campaigns.map((campaign) => campaign.id),
+    );
     return NextResponse.json({
       ...data,
+      campaigns: data.campaigns.map((campaign) => ({
+        ...campaign,
+        scheduledCount: counts[campaign.id]?.total ?? 0,
+        scheduledInstagram: counts[campaign.id]?.instagram ?? 0,
+        scheduledYouTube: counts[campaign.id]?.youtube ?? 0,
+      })),
       activeId: activeCampaign?.id ?? null,
       activeCampaign,
     });
