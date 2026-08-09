@@ -13,7 +13,6 @@ import {
   YOUTUBE_DAILY_UPLOAD_LIMIT,
 } from "@/lib/youtube-upload-policy";
 import { inferYouTubePostSource } from "@/lib/youtube-queue";
-import { purgePublishedExportIfUnused } from "@/lib/purge-published-export";
 import {
   isExportPublishedOnYouTubeAccount,
   markYouTubeExportPublished,
@@ -129,11 +128,7 @@ async function uploadScheduledPost(
     if (post.campaignId) {
       await markYouTubeExportPublished(post.exportId, post.campaignId);
     }
-    try {
-      await purgePublishedExportIfUnused(post.exportId, exp.url);
-    } catch (err) {
-      console.error("[youtube] purge after publish failed", post.exportId, err);
-    }
+    // Keep the finished export in the library for re-schedule / recovery.
 
     return {
       id: post.id,
@@ -197,11 +192,7 @@ async function finalizePublishedPost(
     if (post.campaignId) {
       await markYouTubeExportPublished(post.exportId, post.campaignId);
     }
-    try {
-      await purgePublishedExportIfUnused(post.exportId, exp.url);
-    } catch (err) {
-      console.error("[youtube] purge after publish failed", post.exportId, err);
-    }
+    // Keep the finished export in the library for re-schedule / recovery.
 
     return { id: post.id, ok: true, videoId: post.youtubeVideoId };
   } catch (err) {

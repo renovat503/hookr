@@ -1,0 +1,20 @@
+---
+description: Never hard-delete DB rows or media; prefer soft-cancel and retention for recovery
+alwaysApply: true
+---
+
+# No hard deletes (recovery-first)
+
+Hookr must keep library/export history recoverable. Do **not** hard-delete production data.
+
+## Agent (always)
+
+- Never run `DELETE`, `TRUNCATE`, `DROP`, or `removeLibraryItem` / `deleteMedia` against production unless the user **explicitly** asks to permanently destroy something in that message.
+- Prefer **soft-cancel** (`status: 'cancelled'`) for schedules. Do not hard-delete schedule rows.
+- Recovery scripts may `INSERT` / `UPDATE` exports and schedules. They must not wipe tables or purge media.
+- If cleanup is requested, default to cancelling/archiving — ask before any permanent delete.
+
+## App behavior
+
+- After Instagram/YouTube publish, **do not** remove the export from the library or delete its media file. Finished videos stay available for re-schedule and recovery.
+- Soft-cancelling overlapping schedules is allowed. Removing export library rows after publish is not.

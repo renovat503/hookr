@@ -10,10 +10,8 @@ import {
   toPublicVideoUrl,
 } from "@/lib/instagram";
 import { resolveToLocalPath } from "@/lib/storage/media";
-import { purgePublishedExport } from "@/lib/purge-published-export";
 import {
   isExportPublishedOnAccount,
-  purgeExportFromInstagram,
   readInstagramAll,
   recordAccountPublished,
   removeScheduledPost,
@@ -82,12 +80,8 @@ async function publishScheduledPost(
     const publishedAt = new Date().toISOString();
     await recordAccountPublished(post.accountId, publishedAt);
 
-    try {
-      await purgePublishedExport(post.exportId, exp.url);
-    } catch (err) {
-      console.error("[instagram] purge after publish failed", post.exportId, err);
-      await purgeExportFromInstagram(post.exportId).catch(() => undefined);
-    }
+    // Keep the finished export in the library for re-schedule / recovery.
+    // (Previously purged after publish; that made YouTube/Instagram recovery hard.)
 
     return {
       id: post.id,
