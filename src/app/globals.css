@@ -35,8 +35,8 @@
   --color-warning: var(--warning);
   --color-hook: var(--hook);
   --color-demo: var(--demo);
-  --font-sans: var(--font-instrument);
-  --font-display: var(--font-syne);
+  --font-sans: var(--font-bricolage);
+  --font-display: var(--font-bricolage);
   --font-mono: var(--font-jetbrains);
 }
 
@@ -51,12 +51,12 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-instrument), system-ui, sans-serif;
+  font-family: var(--font-bricolage), system-ui, sans-serif;
   min-height: 100dvh;
 }
 
 .font-display {
-  font-family: var(--font-syne), var(--font-instrument), system-ui, sans-serif;
+  font-family: var(--font-bricolage), system-ui, sans-serif;
 }
 
 .font-mono {

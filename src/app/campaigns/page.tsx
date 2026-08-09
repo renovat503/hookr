@@ -1,9 +1,18 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FolderKanban, Loader2, LogOut, Copy, Plus, Trash2 } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  Clapperboard,
+  Copy,
+  FolderKanban,
+  Loader2,
+  LogOut,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import type { Campaign } from "@/lib/types";
 import { isCampaignClosed } from "@/lib/campaign-status";
 import { cn, friendlyFetchError } from "@/lib/utils";
@@ -13,6 +22,18 @@ type CampaignListItem = Campaign & {
   scheduledInstagram?: number;
   scheduledYouTube?: number;
 };
+
+function campaignInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase() || "C";
+}
+
+function formatCount(n: number) {
+  return new Intl.NumberFormat().format(n);
+}
 
 function CampaignsContent() {
   const router = useRouter();
@@ -52,6 +73,29 @@ function CampaignsContent() {
   useEffect(() => {
     void load();
   }, []);
+
+  const ordered = useMemo(() => {
+    return [...campaigns].sort((a, b) => {
+      if (a.id === activeId) return -1;
+      if (b.id === activeId) return 1;
+      if (isCampaignClosed(a) !== isCampaignClosed(b)) {
+        return isCampaignClosed(a) ? 1 : -1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [campaigns, activeId]);
+
+  const totals = useMemo(() => {
+    return campaigns.reduce(
+      (acc, c) => {
+        acc.scheduled += c.scheduledCount ?? 0;
+        acc.instagram += c.scheduledInstagram ?? 0;
+        acc.youtube += c.scheduledYouTube ?? 0;
+        return acc;
+      },
+      { scheduled: 0, instagram: 0, youtube: 0 },
+    );
+  }, [campaigns]);
 
   const activate = async (id: string) => {
     setActivating(id);
@@ -141,141 +185,245 @@ function CampaignsContent() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-accent">
-            Campaigns
-          </p>
-          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">
-            Choose or create a campaign
-          </h1>
-          <p className="mt-2 max-w-lg text-sm text-muted">
-            Create a campaign with a name, then configure hooks, demos, captions,
-            and audio inside the app.
-          </p>
+    <div className="mx-auto max-w-4xl space-y-10">
+      <header className="space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="font-display text-sm font-semibold tracking-[0.18em] text-accent uppercase">
+              Hookr
+            </p>
+            <h1 className="mt-2 font-display text-4xl font-bold tracking-tight sm:text-5xl">
+              Campaigns
+            </h1>
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
+              Pick a campaign to produce, schedule, and publish. Active campaign
+              stays pinned to the top.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/campaigns/new"
+              className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:brightness-110"
+            >
+              <Plus className="h-4 w-4" />
+              New campaign
+            </Link>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm text-muted transition hover:border-border hover:bg-surface-hover hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              Log out
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Link
-            href="/campaigns/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg"
-          >
-            <Plus className="h-4 w-4" />
-            New campaign
-          </Link>
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="inline-flex items-center gap-2 rounded-xl border border-border-subtle px-4 py-2.5 text-sm text-muted hover:text-foreground"
-          >
-            <LogOut className="h-4 w-4" />
-            Log out
-          </button>
-        </div>
-      </div>
 
-      {error && (
-        <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        {campaigns.length > 0 ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-2xl border border-border-subtle bg-surface/50 px-4 py-3">
+              <p className="text-[11px] font-medium tracking-wide text-muted uppercase">
+                Campaigns
+              </p>
+              <p className="mt-1 font-display text-2xl font-semibold tabular-nums">
+                {formatCount(campaigns.length)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border-subtle bg-surface/50 px-4 py-3">
+              <p className="text-[11px] font-medium tracking-wide text-muted uppercase">
+                Scheduled
+              </p>
+              <p className="mt-1 font-display text-2xl font-semibold tabular-nums">
+                {formatCount(totals.scheduled)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border-subtle bg-surface/50 px-4 py-3">
+              <p className="text-[11px] font-medium tracking-wide text-muted uppercase">
+                Instagram
+              </p>
+              <p className="mt-1 font-display text-2xl font-semibold tabular-nums">
+                {formatCount(totals.instagram)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border-subtle bg-surface/50 px-4 py-3">
+              <p className="text-[11px] font-medium tracking-wide text-muted uppercase">
+                YouTube
+              </p>
+              <p className="mt-1 font-display text-2xl font-semibold tabular-nums">
+                {formatCount(totals.youtube)}
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </header>
+
+      {error ? (
+        <p className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </p>
-      )}
+      ) : null}
 
       {campaigns.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border py-16 text-center">
+        <div className="rounded-3xl border border-dashed border-border px-6 py-20 text-center">
           <FolderKanban className="mx-auto h-10 w-10 text-muted/40" />
-          <p className="mt-3 font-medium">No campaigns yet</p>
-          <p className="mt-1 text-sm text-muted">
-            Create a campaign to get started — you can add assets after.
+          <p className="mt-4 font-display text-xl font-semibold">No campaigns yet</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
+            Create a campaign to start producing hooks, demos, and scheduled posts.
           </p>
           <Link
             href="/campaigns/new"
-            className="mt-4 inline-block text-sm text-accent hover:underline"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg"
           >
-            Create campaign →
+            <Plus className="h-4 w-4" />
+            Create campaign
           </Link>
         </div>
       ) : (
-        <ul className="space-y-3">
-          {campaigns.map((c) => (
-            <li
-              key={c.id}
-              className="flex flex-wrap items-center gap-3 rounded-2xl border border-border-subtle bg-surface-raised/40 p-4"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-display text-lg font-semibold">{c.name}</p>
-                  {isCampaignClosed(c) ? (
-                    <span className="rounded-full border border-border-subtle bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-muted">
-                      Closed
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-0.5 text-xs text-muted">
-                  {c.hookIds.length} hooks · {c.demoIds.length} demos ·{" "}
-                  {c.useCaptions ? `${c.captionIds.length} captions` : "no captions"} ·{" "}
-                  {c.audioMode === "none"
-                    ? "silent"
-                    : c.audioMode === "random"
-                      ? "random music"
-                      : "fixed track"}
-                  {" · "}
-                  {(c.scheduledCount ?? 0) === 0
-                    ? "0 scheduled"
-                    : `${c.scheduledCount ?? 0} scheduled (${c.scheduledInstagram ?? 0} IG · ${c.scheduledYouTube ?? 0} YT)`}
-                </p>
-                {activeId === c.id && (
-                  <span className="mt-1 inline-block text-xs font-medium text-accent">
-                    Active
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                disabled={activating === c.id}
-                onClick={() => void activate(c.id)}
+        <ul className="space-y-2">
+          {ordered.map((c, index) => {
+            const isActive = activeId === c.id;
+            const closed = isCampaignClosed(c);
+            const busy =
+              activating === c.id ||
+              duplicatingId === c.id ||
+              deletingId === c.id;
+
+            return (
+              <motion.li
+                key={c.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.28, delay: Math.min(index * 0.04, 0.24) }}
                 className={cn(
-                  "rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50",
-                  isCampaignClosed(c)
-                    ? "border border-border-subtle hover:bg-surface-hover"
-                    : "bg-accent text-accent-fg",
+                  "group relative overflow-hidden rounded-2xl border transition",
+                  isActive
+                    ? "border-accent/40 bg-accent/[0.06]"
+                    : "border-border-subtle bg-surface/40 hover:border-border hover:bg-surface-raised/60",
+                  closed && "opacity-70",
                 )}
               >
-                {activating === c.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : activeId === c.id ? (
-                  "Open"
-                ) : (
-                  "Use campaign"
-                )}
-              </button>
-              <button
-                type="button"
-                disabled={duplicatingId === c.id || deletingId === c.id || activating === c.id}
-                onClick={() => void duplicateCampaign(c.id, c.name)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50"
-              >
-                {duplicatingId === c.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-                Duplicate
-              </button>
-              <button
-                type="button"
-                disabled={deletingId === c.id || activating === c.id || duplicatingId === c.id}
-                onClick={() => void deleteCampaign(c.id, c.name)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-border-subtle px-3 py-2 text-sm text-muted hover:border-red-500/30 hover:text-red-400 disabled:opacity-50"
-              >
-                {deletingId === c.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-                Delete
-              </button>
-            </li>
-          ))}
+                <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
+                  <div
+                    className={cn(
+                      "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl font-display text-sm font-bold tracking-wide",
+                      isActive
+                        ? "bg-accent text-accent-fg"
+                        : "bg-surface-raised text-muted",
+                    )}
+                    aria-hidden
+                  >
+                    {campaignInitials(c.name)}
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate font-display text-xl font-semibold tracking-tight">
+                        {c.name}
+                      </h2>
+                      {isActive ? (
+                        <span className="rounded-md bg-accent/15 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-accent uppercase">
+                          Active
+                        </span>
+                      ) : null}
+                      {closed ? (
+                        <span className="rounded-md border border-border-subtle px-2 py-0.5 text-[11px] font-medium text-muted">
+                          Closed
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clapperboard className="h-3.5 w-3.5" />
+                        {formatCount(c.hookIds.length)} hooks ·{" "}
+                        {formatCount(c.demoIds.length)} demos
+                      </span>
+                      <span>
+                        {c.useCaptions
+                          ? `${formatCount(c.captionIds.length)} captions`
+                          : "no captions"}
+                        {" · "}
+                        {c.audioMode === "none"
+                          ? "silent"
+                          : c.audioMode === "random"
+                            ? "random music"
+                            : "fixed track"}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-0.5">
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-background/40 px-2.5 py-1 text-xs tabular-nums text-foreground">
+                        <span className="text-muted">Scheduled</span>
+                        <span className="font-semibold">
+                          {formatCount(c.scheduledCount ?? 0)}
+                        </span>
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-background/40 px-2.5 py-1 text-xs tabular-nums text-foreground">
+                        <span className="text-muted">IG</span>
+                        <span className="font-semibold">
+                          {formatCount(c.scheduledInstagram ?? 0)}
+                        </span>
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-background/40 px-2.5 py-1 text-xs tabular-nums text-foreground">
+                        <span className="text-muted">YT</span>
+                        <span className="font-semibold">
+                          {formatCount(c.scheduledYouTube ?? 0)}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void activate(c.id)}
+                      className={cn(
+                        "inline-flex min-w-[7.5rem] items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50",
+                        closed
+                          ? "border border-border text-foreground hover:bg-surface-hover"
+                          : "bg-accent text-accent-fg hover:brightness-110",
+                      )}
+                    >
+                      {activating === c.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isActive ? (
+                        "Open"
+                      ) : (
+                        "Use campaign"
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      title="Duplicate"
+                      disabled={busy}
+                      onClick={() => void duplicateCampaign(c.id, c.name)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border text-muted transition hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+                    >
+                      {duplicatingId === c.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      disabled={busy}
+                      onClick={() => void deleteCampaign(c.id, c.name)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border text-muted transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+                    >
+                      {deletingId === c.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </motion.li>
+            );
+          })}
         </ul>
       )}
     </div>
