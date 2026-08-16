@@ -64,6 +64,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       configured: config.configured,
+      campaignId,
       redirectUri: config.redirectUri,
       accounts: youtube.accounts.map(publicYouTubeAccount),
       scheduledPosts: youtube.scheduledPosts.map((post) => ({

@@ -1,7 +1,11 @@
 import { getActiveCampaignId } from "@/lib/active-campaign";
+import { getCampaign } from "@/lib/campaign-store";
 import { isSecureRequest, campaignCookieOptions, YT_OAUTH_CAMPAIGN_COOKIE } from "@/lib/auth-session";
-import { buildYouTubeAuthUrl, getYouTubeConfig } from "@/lib/youtube";
-import { randomBytes } from "crypto";
+import {
+  buildYouTubeAuthUrl,
+  createYouTubeOAuthState,
+  getYouTubeConfig,
+} from "@/lib/youtube";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -18,7 +22,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const campaignId = await getActiveCampaignId();
+  const requestedCampaignId = new URL(request.url).searchParams.get("campaignId")?.trim();
+  const campaignId =
+    (requestedCampaignId && (await getCampaign(requestedCampaignId))?.id) ||
+    (await getActiveCampaignId());
   if (!campaignId) {
     return NextResponse.json(
       { error: "Select a campaign before connecting YouTube." },
@@ -26,7 +33,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const state = randomBytes(16).toString("hex");
+  const state = createYouTubeOAuthState(campaignId);
   const url = buildYouTubeAuthUrl(state, config.redirectUri);
   const secure = isSecureRequest(request);
   const response = NextResponse.redirect(url);

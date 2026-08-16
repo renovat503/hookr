@@ -67,6 +67,7 @@ type AccountQueue = {
 
 type YouTubePayload = {
   configured: boolean;
+  campaignId?: string | null;
   accounts: PublicAccount[];
   exports: LibraryExport[];
   scheduledPosts: (YouTubeScheduledPost & { exportUrl?: string | null })[];
@@ -678,7 +679,11 @@ export function YouTubeScheduler() {
             </div>
           ) : null}
           <a
-            href="/api/youtube/auth"
+            href={
+              data.campaignId
+                ? `/api/youtube/auth?campaignId=${encodeURIComponent(data.campaignId)}`
+                : "/api/youtube/auth"
+            }
             title={
               data.accounts.length > 0
                 ? "Re-authorize without disconnecting — schedules stay intact"
@@ -751,7 +756,11 @@ export function YouTubeScheduler() {
         <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center">
           <p className="mb-4 text-sm text-muted">No YouTube accounts connected.</p>
           <a
-            href="/api/youtube/auth"
+            href={
+              data.campaignId
+                ? `/api/youtube/auth?campaignId=${encodeURIComponent(data.campaignId)}`
+                : "/api/youtube/auth"
+            }
             className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg"
           >
             <Link2 className="h-4 w-4" />

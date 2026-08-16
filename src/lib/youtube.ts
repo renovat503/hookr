@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { stat } from "fs/promises";
 import { readFile } from "fs/promises";
 import { resolveAppUrl, youtubeOAuthRedirectUri } from "./app-url";
@@ -25,6 +26,54 @@ export function getYouTubeConfig(request?: Request) {
     redirectUri: youtubeOAuthRedirectUri(request),
     configured: Boolean(clientId && clientSecret),
   };
+}
+
+function oauthStateSecret() {
+  return (
+    process.env.HOOKR_AUTH_SECRET?.trim() ||
+    process.env.HOOKR_PASSWORD?.trim() ||
+    process.env.GOOGLE_CLIENT_SECRET?.trim() ||
+    ""
+  );
+}
+
+/** Signed OAuth state so reconnect binds to a campaign even if cookies are overwritten. */
+export function createYouTubeOAuthState(campaignId: string) {
+  const payload = Buffer.from(
+    JSON.stringify({
+      c: campaignId,
+      n: randomBytes(16).toString("hex"),
+      e: Date.now() + 10 * 60 * 1000,
+    }),
+  ).toString("base64url");
+  const sig = createHmac("sha256", oauthStateSecret())
+    .update(payload)
+    .digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+export function parseYouTubeOAuthState(
+  state: string | null,
+): { campaignId: string } | null {
+  if (!state) return null;
+  const [payload, sig] = state.split(".");
+  if (!payload || !sig) return null;
+  const expected = createHmac("sha256", oauthStateSecret())
+    .update(payload)
+    .digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as { c?: string; e?: number };
+    if (!data.c || typeof data.c !== "string") return null;
+    if (typeof data.e === "number" && Date.now() > data.e) return null;
+    return { campaignId: data.c };
+  } catch {
+    return null;
+  }
 }
 
 export function buildYouTubeAuthUrl(state: string, redirectUri: string) {

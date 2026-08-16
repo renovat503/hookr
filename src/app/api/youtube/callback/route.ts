@@ -4,6 +4,7 @@ import {
   discoverYouTubeChannels,
   exchangeCodeForTokens,
   getYouTubeConfig,
+  parseYouTubeOAuthState,
 } from "@/lib/youtube";
 import { readYouTube, upsertYouTubeAccounts } from "@/lib/youtube-store";
 import { YT_OAUTH_CAMPAIGN_COOKIE } from "@/lib/auth-session";
@@ -35,9 +36,14 @@ export async function GET(request: Request) {
 
   const cookieHeader = request.headers.get("cookie") || "";
   const expected = readRequestCookie(cookieHeader, "yt_oauth_state");
-  const campaignId = readRequestCookie(cookieHeader, YT_OAUTH_CAMPAIGN_COOKIE);
+  const signed = parseYouTubeOAuthState(state);
+  const cookieCampaignId = readRequestCookie(
+    cookieHeader,
+    YT_OAUTH_CAMPAIGN_COOKIE,
+  );
+  const campaignId = signed?.campaignId || cookieCampaignId;
 
-  if (!expected || expected !== state) {
+  if (!signed && (!expected || expected !== state)) {
     return NextResponse.redirect(
       `${redirectBase}?error=${encodeURIComponent("Invalid OAuth state.")}`,
     );
