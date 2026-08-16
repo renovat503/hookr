@@ -5,7 +5,9 @@ import type { YouTubeScheduledPost } from "@/lib/types";
 export const YOUTUBE_DAILY_UPLOAD_LIMIT = 6;
 
 export function isYouTubeQuotaError(message: string): boolean {
-  return /quota|dailyLimitExceeded|uploadLimitExceeded/i.test(message);
+  return /quota|dailyLimitExceeded|uploadLimitExceeded|exceeded the number of videos they may upload/i.test(
+    message,
+  );
 }
 
 export type YouTubeUploadStats = {

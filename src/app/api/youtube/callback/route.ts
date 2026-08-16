@@ -5,7 +5,7 @@ import {
   exchangeCodeForTokens,
   getYouTubeConfig,
 } from "@/lib/youtube";
-import { upsertYouTubeAccounts } from "@/lib/youtube-store";
+import { readYouTube, upsertYouTubeAccounts } from "@/lib/youtube-store";
 import { YT_OAUTH_CAMPAIGN_COOKIE } from "@/lib/auth-session";
 import type { YouTubeAccount } from "@/lib/types";
 
@@ -64,17 +64,28 @@ export async function GET(request: Request) {
     }
 
     const now = Date.now();
-    const accounts: YouTubeAccount[] = channels.map((channel) => ({
-      id: `yt-${campaignId}-${channel.channelId}`,
-      campaignId,
-      channelId: channel.channelId,
-      channelTitle: channel.channelTitle,
-      thumbnailUrl: channel.thumbnailUrl,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      connectedAt: new Date().toISOString(),
-      tokenExpiresAt: new Date(now + tokens.expiresIn * 1000).toISOString(),
-    }));
+    // Re-auth updates tokens in place (same account id). Schedules are not
+    // cancelled — only Disconnect does that. Preserve an existing refresh
+    // token if Google omits a new one on reconnect.
+    const existing = (await readYouTube(campaignId)).accounts;
+    const existingByChannel = new Map(
+      existing.map((account) => [account.channelId, account]),
+    );
+
+    const accounts: YouTubeAccount[] = channels.map((channel) => {
+      const prev = existingByChannel.get(channel.channelId);
+      return {
+        id: prev?.id ?? `yt-${campaignId}-${channel.channelId}`,
+        campaignId,
+        channelId: channel.channelId,
+        channelTitle: channel.channelTitle,
+        thumbnailUrl: channel.thumbnailUrl,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken ?? prev?.refreshToken ?? null,
+        connectedAt: new Date().toISOString(),
+        tokenExpiresAt: new Date(now + tokens.expiresIn * 1000).toISOString(),
+      };
+    });
 
     await upsertYouTubeAccounts(accounts);
 

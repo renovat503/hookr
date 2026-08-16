@@ -12,6 +12,7 @@ import {
 import { resolveToLocalPath } from "@/lib/storage/media";
 import {
   isExportPublishedOnAccount,
+  markExportPublishedOnAccount,
   readInstagramAll,
   recordAccountPublished,
   removeScheduledPost,
@@ -41,7 +42,11 @@ export type ProcessDueResult = {
   rateLimitedUntil?: string | null;
 };
 
+const MAX_DUE_PER_TICK = 1;
+const STALE_LOCK_MS = 12 * 60 * 1000;
+
 let processing = false;
+let processingStartedAt = 0;
 
 async function publishScheduledPost(
   instagram: InstagramData,
@@ -78,10 +83,17 @@ async function publishScheduledPost(
     });
 
     const publishedAt = new Date().toISOString();
+    await updateScheduledPost(post.id, {
+      status: "published",
+      publishedAt,
+      publishedMediaId: published.mediaId,
+      exportName: post.exportName || exp.name,
+      error: null,
+    });
+    await markExportPublishedOnAccount(post.accountId, post.exportId);
     await recordAccountPublished(post.accountId, publishedAt);
 
     // Keep the finished export in the library for re-schedule / recovery.
-    // (Previously purged after publish; that made YouTube/Instagram recovery hard.)
 
     return {
       id: post.id,
@@ -129,10 +141,18 @@ export async function processInstagramDue(options?: {
   id?: string;
 }): Promise<ProcessDueResult> {
   if (processing) {
-    return { processed: 0, results: [], skipped: true };
+    if (Date.now() - processingStartedAt < STALE_LOCK_MS) {
+      return { processed: 0, results: [], skipped: true };
+    }
+    console.warn(
+      "[instagram/process-due] stale lock — previous run exceeded",
+      STALE_LOCK_MS,
+      "ms; starting a new tick",
+    );
   }
 
   processing = true;
+  processingStartedAt = Date.now();
   try {
     const instagram = await readInstagramAll();
     if (isInstagramRateLimited(instagram.apiRateLimitedUntil)) {
@@ -147,12 +167,18 @@ export async function processInstagramDue(options?: {
     const library = await readLibrary("exports");
     const now = Date.now();
 
-    const due = instagram.scheduledPosts.filter((post) => {
-      if (options?.id) return post.id === options.id;
-      if (inferPostSource(post) === "auto") return false;
-      if (post.status !== "scheduled") return false;
-      return new Date(post.scheduledAt).getTime() <= now;
-    });
+    const due = instagram.scheduledPosts
+      .filter((post) => {
+        if (options?.id) return post.id === options.id;
+        if (inferPostSource(post) === "auto") return false;
+        if (post.status !== "scheduled") return false;
+        return new Date(post.scheduledAt).getTime() <= now;
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
+      )
+      .slice(0, options?.id ? undefined : MAX_DUE_PER_TICK);
 
     const results: ProcessResult[] = [];
 

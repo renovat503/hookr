@@ -49,7 +49,9 @@ async function igGet<T>(
   query: Record<string, string> = {},
 ): Promise<T> {
   const params = new URLSearchParams({ ...query, access_token: accessToken });
-  const res = await fetch(`${IG_GRAPH}${pathname}?${params.toString()}`);
+  const res = await fetch(`${IG_GRAPH}${pathname}?${params.toString()}`, {
+    signal: AbortSignal.timeout(60_000),
+  });
   const json = (await res.json()) as T & {
     error?: { message?: string; code?: number };
   };
@@ -69,6 +71,7 @@ async function igPost<T>(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
+    signal: AbortSignal.timeout(60_000),
   });
   const json = (await res.json()) as T & {
     error?: { message?: string };

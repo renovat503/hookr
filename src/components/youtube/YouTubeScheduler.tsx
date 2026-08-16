@@ -679,10 +679,15 @@ export function YouTubeScheduler() {
           ) : null}
           <a
             href="/api/youtube/auth"
+            title={
+              data.accounts.length > 0
+                ? "Re-authorize without disconnecting — schedules stay intact"
+                : undefined
+            }
             className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-border px-3 py-2 text-sm text-muted hover:text-foreground"
           >
             <Link2 className="h-4 w-4" />
-            Connect
+            {data.accounts.length > 0 ? "Reconnect" : "Connect"}
           </a>
           {activeAccountId ? (
             <button
