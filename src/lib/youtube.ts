@@ -239,6 +239,7 @@ export async function getYouTubeVideoStatus(
   });
   const res = await fetch(`${YT_API}/videos?${params.toString()}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(60_000),
   });
   const json = (await res.json()) as {
     items?: Array<{
@@ -295,6 +296,7 @@ export async function uploadYouTubeVideo(options: {
         },
         status,
       }),
+      signal: AbortSignal.timeout(60_000),
     },
   );
 
@@ -318,6 +320,7 @@ export async function uploadYouTubeVideo(options: {
       "Content-Type": "video/mp4",
     },
     body: buffer,
+    signal: AbortSignal.timeout(300_000),
   });
 
   const uploadJson = (await uploadRes.json().catch(() => ({}))) as {

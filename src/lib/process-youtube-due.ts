@@ -46,7 +46,11 @@ export type ProcessDueResult = {
   retriedFailed?: number;
 };
 
+const MAX_DUE_PER_TICK = 1;
+const STALE_LOCK_MS = 12 * 60 * 1000;
+
 let processing = false;
+let processingStartedAt = 0;
 
 async function getFreshAccount(account: YouTubeAccount): Promise<YouTubeAccount> {
   const accessToken = await ensureFreshAccessToken(account, async (patch) => {
@@ -226,10 +230,18 @@ export async function processYouTubeDue(options?: {
   id?: string;
 }): Promise<ProcessDueResult> {
   if (processing) {
-    return { processed: 0, results: [], skipped: true };
+    if (Date.now() - processingStartedAt < STALE_LOCK_MS) {
+      return { processed: 0, results: [], skipped: true };
+    }
+    console.warn(
+      "[youtube/process-due] stale lock — previous run exceeded",
+      STALE_LOCK_MS,
+      "ms; starting a new tick",
+    );
   }
 
   processing = true;
+  processingStartedAt = Date.now();
   try {
     let youtube = await readYouTubeAll();
     const retriedFailed = await resetQuotaFailedPosts(youtube);
@@ -251,7 +263,11 @@ export async function processYouTubeDue(options?: {
     const results: ProcessResult[] = [];
     const uploadsTodayByAccount = new Map<string, number>();
 
-    for (const post of pendingUploadPosts(youtube, options?.id)) {
+    const duePosts = options?.id
+      ? pendingUploadPosts(youtube, options.id)
+      : pendingUploadPosts(youtube).slice(0, MAX_DUE_PER_TICK);
+
+    for (const post of duePosts) {
       const uploadsToday =
         uploadsTodayByAccount.get(post.accountId) ??
         countYouTubeUploadsToday(youtube.scheduledPosts, post.accountId);

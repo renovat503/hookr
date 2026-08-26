@@ -23,6 +23,20 @@ function isPublic(pathname: string): boolean {
   return false;
 }
 
+function hasCronSecret(request: NextRequest): boolean {
+  const secret = process.env.HOOKR_CRON_SECRET?.trim();
+  if (!secret) return false;
+  const header = request.headers.get("x-hookr-cron-secret")?.trim();
+  return Boolean(header && header === secret);
+}
+
+function isCronProcessDue(pathname: string): boolean {
+  return (
+    pathname === "/api/instagram/process-due" ||
+    pathname === "/api/youtube/process-due"
+  );
+}
+
 function needsActiveCampaign(pathname: string): boolean {
   if (pathname.startsWith("/campaigns")) return false;
   if (pathname.startsWith("/login")) return false;
@@ -41,6 +55,10 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublic(pathname)) {
+    return NextResponse.next();
+  }
+
+  if (isCronProcessDue(pathname) && hasCronSecret(request)) {
     return NextResponse.next();
   }
 
