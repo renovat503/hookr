@@ -3,6 +3,7 @@ import {
   getInstagramRateLimitBackoffMs,
   isInstagramRateLimitError,
   isInstagramRateLimited,
+  limitInstagramHashtags,
 } from "@/lib/instagram-errors";
 import { inferPostSource } from "@/lib/instagram-queue";
 import {
@@ -74,11 +75,12 @@ async function publishScheduledPost(
   try {
     const publicVideoUrl = toPublicVideoUrl(exp.url);
     const videoPath = await resolveToLocalPath(exp.url);
+    const caption = limitInstagramHashtags(post.caption);
     const published = await publishReelFromLocalFile({
       igUserId: account.igUserId,
       accessToken: account.accessToken,
       videoPath,
-      caption: post.caption,
+      caption,
       publicVideoUrl,
     });
 
