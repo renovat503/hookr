@@ -122,12 +122,12 @@ export async function DELETE(request: Request) {
     }
 
     const deleted: string[] = [];
-    const errors: Array<{ id: string; error: string }> = [];
+    const errors: Array<{ id: string; error: string; status?: number }> = [];
 
     for (const id of ids) {
       const result = await deleteExportById(id, campaignId);
       if ("error" in result) {
-        errors.push({ id, error: result.error });
+        errors.push({ id, error: result.error, status: result.status });
         continue;
       }
       deleted.push(result.id);
