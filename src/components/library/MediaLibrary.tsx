@@ -127,6 +127,7 @@ export function MediaLibrary({
   const [deletingExportId, setDeletingExportId] = useState<string | null>(null);
   const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkDownloadProgress, setBulkDownloadProgress] =
     useState<BulkDownloadProgress | null>(null);
   const [downloadCounts, setDownloadCounts] = useState<Record<string, number>>(
@@ -510,7 +511,7 @@ export function MediaLibrary({
   const deleteExport = async (id: string, name: string) => {
     if (
       !window.confirm(
-        `Delete “${name}”?\n\nThis removes the video file and cancels any Instagram schedules for it.`,
+        `Delete “${name}”?\n\nThis removes the video file and cancels any Instagram/YouTube schedules for it.`,
       )
     ) {
       return;
@@ -530,6 +531,45 @@ export function MediaLibrary({
       setError(err instanceof Error ? err.message : "Could not delete export.");
     } finally {
       setDeletingExportId(null);
+    }
+  };
+
+  const deleteSelectedExports = async () => {
+    const selected = exports.filter((exp) => selectedExportIds.includes(exp.id));
+    if (!selected.length) return;
+    const campaignLabel = activeCampaign?.name ?? "this campaign";
+    if (
+      !window.confirm(
+        `Delete ${selected.length} finished video${selected.length === 1 ? "" : "s"} from ${campaignLabel}?\n\nThis permanently removes the files and cancels any Instagram/YouTube schedules for them.`,
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/library/exports", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selected.map((exp) => exp.id) }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        deletedCount?: number;
+        errors?: Array<{ id: string; error: string }>;
+      };
+      if (!res.ok) throw new Error(json.error || "Could not delete exports.");
+      setSelectedExportIds([]);
+      await load();
+      if (json.errors?.length) {
+        setError(
+          `Deleted ${json.deletedCount ?? 0}, but ${json.errors.length} could not be removed.`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete exports.");
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -1056,7 +1096,7 @@ export function MediaLibrary({
                     <button
                       type="button"
                       onClick={selectAllExports}
-                      disabled={bulkDownloading}
+                      disabled={bulkDownloading || bulkDeleting}
                       className="text-xs font-medium text-accent hover:underline disabled:opacity-50"
                     >
                       Select all ({exports.length})
@@ -1067,7 +1107,7 @@ export function MediaLibrary({
                         <button
                           type="button"
                           onClick={clearExportSelection}
-                          disabled={bulkDownloading}
+                          disabled={bulkDownloading || bulkDeleting}
                           className="text-xs font-medium text-muted hover:text-foreground disabled:opacity-50"
                         >
                           Clear
@@ -1075,20 +1115,48 @@ export function MediaLibrary({
                       </>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    disabled={bulkDownloading || !selectedExportIds.length}
-                    onClick={() => void downloadSelectedExports()}
-                    className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-fg disabled:opacity-50"
-                  >
-                    {bulkDownloading ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )}
-                    Download selected
-                    {selectedExportIds.length ? ` (${selectedExportIds.length})` : ""}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={
+                        bulkDownloading ||
+                        bulkDeleting ||
+                        !selectedExportIds.length
+                      }
+                      onClick={() => void downloadSelectedExports()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-accent-fg disabled:opacity-50"
+                    >
+                      {bulkDownloading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      Download selected
+                      {selectedExportIds.length
+                        ? ` (${selectedExportIds.length})`
+                        : ""}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        bulkDownloading ||
+                        bulkDeleting ||
+                        !selectedExportIds.length
+                      }
+                      onClick={() => void deleteSelectedExports()}
+                      className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-xs font-semibold text-muted hover:border-red-500/50 hover:text-red-400 disabled:opacity-50"
+                    >
+                      {bulkDeleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      Delete selected
+                      {selectedExportIds.length
+                        ? ` (${selectedExportIds.length})`
+                        : ""}
+                    </button>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
                   <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
@@ -1101,7 +1169,7 @@ export function MediaLibrary({
                       <div key={size} className="flex items-center gap-1">
                         <button
                           type="button"
-                          disabled={bulkDownloading}
+                          disabled={bulkDownloading || bulkDeleting}
                           onClick={() => selectFirstExports(available)}
                           className="rounded-lg border border-border px-2 py-1 text-xs text-muted hover:text-foreground disabled:opacity-50"
                         >
@@ -1109,7 +1177,7 @@ export function MediaLibrary({
                         </button>
                         <button
                           type="button"
-                          disabled={bulkDownloading}
+                          disabled={bulkDownloading || bulkDeleting}
                           onClick={() => void downloadFirstExports(available)}
                           className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-xs font-medium hover:border-accent disabled:opacity-50"
                         >
@@ -1148,7 +1216,7 @@ export function MediaLibrary({
                           <input
                             type="checkbox"
                             checked={selected}
-                            disabled={bulkDownloading}
+                            disabled={bulkDownloading || bulkDeleting}
                             onChange={() => toggleExportSelection(exp.id)}
                             className="accent-accent"
                           />
@@ -1186,7 +1254,11 @@ export function MediaLibrary({
                           />
                           <button
                             type="button"
-                            disabled={deletingExportId === exp.id || bulkDownloading}
+                            disabled={
+                              deletingExportId === exp.id ||
+                              bulkDownloading ||
+                              bulkDeleting
+                            }
                             onClick={() => void deleteExport(exp.id, exp.name)}
                             className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-danger disabled:opacity-50"
                           >

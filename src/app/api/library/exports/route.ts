@@ -4,9 +4,10 @@ import {
   ExportDuplicateError,
   exportLibraryVideo,
 } from "@/lib/export-video";
-import { purgeExportFromInstagram } from "@/lib/instagram-store";
+import { removeExportReferences } from "@/lib/instagram-store";
 import { deleteMedia } from "@/lib/storage/media";
 import { readLibrary, removeLibraryItem } from "@/lib/library-store";
+import { removeYouTubeExportReferences } from "@/lib/youtube-store";
 import type { OverlayStyle } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -29,6 +30,31 @@ type ExportBody = {
   sequence?: number;
   campaignId?: string | null;
 };
+
+async function deleteExportById(
+  id: string,
+  campaignId: string | null,
+): Promise<{ id: string } | { error: string; status: number }> {
+  const library = await readLibrary("exports", { campaignId });
+  const exp = library.exports.find((e) => e.id === id);
+  if (!exp) {
+    return { error: "Finished video not found.", status: 404 };
+  }
+  if (campaignId && exp.campaignId && exp.campaignId !== campaignId) {
+    return {
+      error: "That finished video belongs to a different campaign.",
+      status: 403,
+    };
+  }
+
+  await deleteMedia(exp.url);
+  await removeLibraryItem("exports", id);
+  // Soft-cancel schedules; keep rows for recovery. Do not hard-delete schedule history.
+  await removeExportReferences(id);
+  await removeYouTubeExportReferences(id);
+
+  return { id };
+}
 
 export async function POST(request: Request) {
   try {
@@ -56,22 +82,73 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const id = new URL(request.url).searchParams.get("id")?.trim();
-    if (!id) {
-      return NextResponse.json({ error: "id is required." }, { status: 400 });
+    const campaignId = await getActiveCampaignId();
+    const { searchParams } = new URL(request.url);
+    const singleId = searchParams.get("id")?.trim();
+
+    let ids: string[] = [];
+    if (singleId) {
+      ids = [singleId];
+    } else {
+      const body = (await request.json().catch(() => ({}))) as {
+        ids?: unknown;
+      };
+      if (Array.isArray(body.ids)) {
+        ids = body.ids
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => id.trim())
+          .filter(Boolean);
+      }
     }
 
-    const library = await readLibrary("exports");
-    const exp = library.exports.find((e) => e.id === id);
-    if (!exp) {
-      return NextResponse.json({ error: "Finished video not found." }, { status: 404 });
+    ids = [...new Set(ids)];
+    if (!ids.length) {
+      return NextResponse.json(
+        { error: "Provide id or ids of finished videos to delete." },
+        { status: 400 },
+      );
+    }
+    if (!campaignId) {
+      return NextResponse.json(
+        { error: "Select a campaign before deleting finished videos." },
+        { status: 400 },
+      );
+    }
+    if (ids.length > 100) {
+      return NextResponse.json(
+        { error: "Delete up to 100 finished videos at a time." },
+        { status: 400 },
+      );
     }
 
-    await deleteMedia(exp.url);
-    await removeLibraryItem("exports", id);
-    await purgeExportFromInstagram(id);
+    const deleted: string[] = [];
+    const errors: Array<{ id: string; error: string }> = [];
 
-    return NextResponse.json({ ok: true, id });
+    for (const id of ids) {
+      const result = await deleteExportById(id, campaignId);
+      if ("error" in result) {
+        errors.push({ id, error: result.error });
+        continue;
+      }
+      deleted.push(result.id);
+    }
+
+    if (!deleted.length) {
+      return NextResponse.json(
+        {
+          error: errors[0]?.error || "Could not delete finished videos.",
+          errors,
+        },
+        { status: errors[0]?.status === 403 ? 403 : 404 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deleted,
+      deletedCount: deleted.length,
+      errors: errors.length ? errors : undefined,
+    });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Could not delete finished video.";
