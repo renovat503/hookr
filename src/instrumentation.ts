@@ -25,35 +25,43 @@ export async function register() {
     void ensureInstagramMeta();
   }, 15_000);
 
-  const { processInstagramDue } = await import("./lib/process-instagram-due");
-  const { processYouTubeDue } = await import("./lib/process-youtube-due");
+  try {
+    const { processInstagramDue } = await import("./lib/process-instagram-due");
+    const { processYouTubeDue } = await import("./lib/process-youtube-due");
 
-  const tick = () => {
-    void processInstagramDue().catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const cause =
-        err instanceof Error && err.cause instanceof Error
-          ? err.cause.message
-          : null;
-      console.error(
-        "[hookr/scheduled-posts/instagram]",
-        cause ? `${message} (${cause})` : message,
-      );
-    });
-    void processYouTubeDue().catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const cause =
-        err instanceof Error && err.cause instanceof Error
-          ? err.cause.message
-          : null;
-      console.error(
-        "[hookr/scheduled-posts/youtube]",
-        cause ? `${message} (${cause})` : message,
-      );
-    });
-  };
+    const tick = () => {
+      void processInstagramDue().catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const cause =
+          err instanceof Error && err.cause instanceof Error
+            ? err.cause.message
+            : null;
+        console.error(
+          "[hookr/scheduled-posts/instagram]",
+          cause ? `${message} (${cause})` : message,
+        );
+      });
+      void processYouTubeDue().catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const cause =
+          err instanceof Error && err.cause instanceof Error
+            ? err.cause.message
+            : null;
+        console.error(
+          "[hookr/scheduled-posts/youtube]",
+          cause ? `${message} (${cause})` : message,
+        );
+      });
+    };
 
-  // First run shortly after server boot, then every two minutes.
-  setTimeout(tick, 8_000);
-  setInterval(tick, 120_000);
+    // First run shortly after server boot, then every two minutes.
+    setTimeout(tick, 8_000);
+    setInterval(tick, 120_000);
+    console.log("[hookr] scheduled publish ticker registered (every 120s)");
+  } catch (err) {
+    console.error(
+      "[hookr] failed to register scheduled publish ticker",
+      err instanceof Error ? err.message : err,
+    );
+  }
 }

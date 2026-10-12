@@ -14,6 +14,34 @@ import { getStorageBucket, getSupabaseAdmin } from "@/lib/storage/supabase";
 
 export const runtime = "nodejs";
 
+/** Keep publishing alive even if instrumentation.js never registered (common on some hosts). */
+const PUBLISH_KICK_MS = 120_000;
+let lastPublishKickAt = 0;
+
+function kickDuePublishers() {
+  const now = Date.now();
+  if (now - lastPublishKickAt < PUBLISH_KICK_MS) return;
+  lastPublishKickAt = now;
+
+  void import("@/lib/process-instagram-due")
+    .then(({ processInstagramDue }) => processInstagramDue())
+    .catch((err) => {
+      console.error(
+        "[health/publish-kick/instagram]",
+        err instanceof Error ? err.message : err,
+      );
+    });
+
+  void import("@/lib/process-youtube-due")
+    .then(({ processYouTubeDue }) => processYouTubeDue())
+    .catch((err) => {
+      console.error(
+        "[health/publish-kick/youtube]",
+        err instanceof Error ? err.message : err,
+      );
+    });
+}
+
 export async function GET() {
   const result = {
     ok: true,
@@ -67,6 +95,11 @@ export async function GET() {
     }
   } else {
     result.supabase.error = "Supabase reads disabled (HOOKR_MEDIA_MODE=local).";
+  }
+
+  // Railway (and most hosts) hit /api/health regularly — use that as a publish heartbeat.
+  if (result.ok) {
+    kickDuePublishers();
   }
 
   return NextResponse.json(result, { status: result.ok ? 200 : 503 });
